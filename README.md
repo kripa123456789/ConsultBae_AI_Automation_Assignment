@@ -228,118 +228,87 @@ App will open in your browser at `http://localhost:8501`.
 
 ---
 
-## Data Issues Report
+# Data Issues Report
 
-This section documents every data-quality problem found across the three raw source files (`source1_naukri_applicants.csv`, `source2_gig_workers.csv`, `source3_cbnexus_contacts.csv`) and the precise engineering actions taken in Task 1.
+While working with the three source files, I found several problems in the data. I cleaned, corrected, or safely handled these problems before using the data for matching and storing it in the database.
 
----
+## 1. Blank row
 
-### A. Data Quality / Consistency Findings
+**Issue:** One row in the gig-worker file was completely empty.
 
-The following 11 items represent directly observed raw file anomalies, syntax errors, structural corruptions, and field formatting variations:
+**How I handled it:** I ignored the empty row and recorded it in the quarantine log instead of putting it into the database.
 
-#### 1. Blank Row (`source2_gig_workers.csv`)
+## 2. Duplicate header in the middle of the file
 
-- **Evidence**: Line 12 in `source2_gig_workers.csv` is completely empty (`,,,,,`).
-- **Problem**: Causes empty record insertions or database `NOT NULL` constraint validation failures.
-- **Why it matters**: Inserting empty rows pollutes analytics and breaks relational integrity.
-- **Task 1 Handling**: Checked in `ingest_source2()` during CSV loop (`all(c.strip() == "" for c in r)`). Quarantined & dropped; logged in `ingestion_quarantine_log` as `BLANK_ROW` with `resolution_action = 'DROPPED'`.
+**Issue:** The third source file had another header row in the middle of the actual data.
 
-#### 2. Embedded Duplicate Header (`source3_cbnexus_contacts.csv`)
+**How I handled it:** I detected that row as a duplicate header, removed it from the actual data, and recorded it in the quarantine log.
 
-- **Evidence**: Line 16 in `source3_cbnexus_contacts.csv` contains `Name,Phone Number,City,Verified,Projects Completed`.
-- **Problem**: Duplicate CSV header row embedded in the middle of data rows.
-- **Why it matters**: Treats column titles ("Name", "Phone Number") as an actual candidate record.
-- **Task 1 Handling**: Structural check in `ingest_source3()` (`name == "Name"` & `phone == "Phone Number"`). Quarantined & dropped; logged in `ingestion_quarantine_log` as `DUPLICATE_HEADER` with `resolution_action = 'DROPPED'`.
+## 3. One row had its columns shifted
 
-#### 3. Structural Column Shift / Malformed Row (`source2_gig_workers.csv`)
+**Issue:** One gig-worker record had its values in the wrong columns. For example, the skills were where the email should have been, and the email was where the name should have been.
 
-- **Evidence**: Line 20 in `source2_gig_workers.csv` contains `['react, javascript, mysql', 'ISHA.CHOPRA95@MAILTEST.EXAMPLE.ORG', 'Isha Chopra', '1406/hr', 'Pune', 'active']`.
-- **Problem**: Values shifted 1 column position to the right (skills in email column, email in name column, name in rate column, rate in location column, location in status column, status in skills column).
-- **Why it matters**: Skews parser completely; puts comma-separated skills into email field.
-- **Task 1 Handling**: Structural validation check in `ingest_source2()` (`Field 0` fails email regex & `Field 1` passes email regex). Saved verbatim raw CSV line in `raw_line_content`, set `was_malformed = TRUE` and `recovery_reason` in `raw_source2_gig_workers`, logged `COLUMN_SHIFT` in quarantine, and un-shifted fields into correct slots in memory (`email`, `name`, `rate`, `location`, `status`, `skills`) for canonical ingestion.
+**How I handled it:** I detected the problem by checking whether the values matched the expected type of each column. I recovered the row by moving the values back into the correct positions, while also keeping the original row for traceability.
 
-#### 4. Inconsistent CTC Units (`source1_naukri_applicants.csv`)
+## 4. Different salary formats
 
-- **Evidence**: Line 3 (`332456` raw annual INR) vs Line 2 (`4.2` LPA float).
-- **Problem**: Raw annual INR figures (e.g. 332,456) mixed with LPA floats (e.g. 4.2).
-- **Why it matters**: Direct sorting or filtering distorts salary metrics by orders of magnitude.
-- **Task 1 Handling**: `normalize_ctc()` in `normalizer.py` converts values > 100 into LPA float by dividing by 100,000 and rounding to 2 decimal places (`332456` → `3.32`). Stored in `candidate_profiles.expected_ctc_lpa`.
+**Issue:** Salary values in the Naukri file were not stored in the same format. Some were given as LPA, while another value was given as an annual amount in rupees.
 
-#### 5. Inconsistent Rate Units & Formats (`source2_gig_workers.csv`)
+**How I handled it:** I converted all salary values into the same LPA format before storing them.
 
-- **Evidence**: Line 2 (`1415/hr`) vs Line 3 (`15k/month`).
-- **Problem**: Hourly rates (`/hr`) and monthly rates (`k/month`) mixed in a single text column.
-- **Why it matters**: Hourly and monthly rates are distinct compensation structures and cannot be stored or compared in a single raw numeric field.
-- **Task 1 Handling**: `normalize_rate()` in `normalizer.py` parses string into separate structured numeric fields (`hourly_rate_inr` or `monthly_rate_inr`). Stored in distinct columns in `candidate_profiles`.
+## 5. Different payment rate formats
 
-#### 6. Mixed Date Formats (`source1_naukri_applicants.csv`)
+**Issue:** Gig-worker rates were written in different ways, such as hourly rates and monthly rates.
 
-- **Evidence**: Line 2 (`2026-08-08` YYYY-MM-DD), Line 3 (`24-07-2026` DD-MM-YYYY), Line 5 (`07/13/2026` MM/DD/YYYY), Line 6 (`7 Jul 2026` D MMM YYYY).
-- **Problem**: Four distinct date string representations across applicant records.
-- **Why it matters**: Non-standard date strings break SQL range queries, indexing, and chronological sorting.
-- **Task 1 Handling**: `normalize_date()` in `normalizer.py` tries multiple `strptime` formats and standardizes all dates into ISO-8601 strings (`YYYY-MM-DD`).
+**How I handled it:** I separated them into different fields for hourly and monthly rates so they could be stored and compared correctly.
 
-#### 7. Phone Format Inconsistencies (`source1_naukri_applicants.csv` & `source3_cbnexus_contacts.csv`)
+## 6. Different date formats
 
-- **Evidence**: S1 Line 2 (`+919000000254`), S1 Line 5 (`09000000287`), S3 Line 3 (`919000000146`), S3 Line 5 (`+91-9000000131`), S1 Line 10 (`9000000237`).
-- **Problem**: Leading zeros, `+91` country codes, `91` prefixes, and hyphen delimiters.
-- **Why it matters**: Exact string matching fails for entity resolution between Source 1 and Source 3 despite representing the identical telephone number.
-- **Task 1 Handling**: `normalize_phone()` in `normalizer.py` strips non-digits and leading `+91`, `91`, or `0` trunk prefixes to extract clean 10-digit strings stored in `person_phones` and used as the Tier 1B matching key.
+**Issue:** Dates were written in several different formats, such as `2026-08-08`, `24-07-2026`, `07/13/2026`, and `7 Jul 2026`.
 
-#### 8. City Name Casing & Variations (All 3 CSV Sources)
+**How I handled it:** I converted all dates into one standard date format before storing them.
 
-- **Evidence**: S1 Line 4 (`GURGAON`), S2 Line 2 (`bangalore`), S2 Line 3 (`Noida ` trailing space), S3 Line 4 (`Gurgaon`), S3 Line 5 (`new delhi`).
-- **Problem**: Casing differences, trailing spaces, and naming variants (`Gurgaon` vs `Gurugram`, `bangalore` vs `Bengaluru`, `new delhi` vs `Delhi`).
-- **Why it matters**: Prevents location filtering and breaks Tier 2 (Name + City) entity resolution.
-- **Task 1 Handling**: `normalize_city()` in `normalizer.py` uses `CITY_CANONICAL_MAP` to map variants to standardized canonical city names (`Bengaluru`, `Gurugram`, `Noida`, `Delhi NCR`).
+## 7. Different phone number formats
 
-#### 9. Email Casing & Whitespace (`source1_naukri_applicants.csv` & `source2_gig_workers.csv`)
+**Issue:** The same type of phone number appeared in different formats, for example with `+91`, `91`, a leading `0`, or hyphens.
 
-- **Evidence**: S2 Line 7 (`ISHA.CHOPRA95@MAILTEST.EXAMPLE.ORG` in ALL CAPS) vs S1 Line 2 (`tanvi.gupta31@example.com`).
-- **Problem**: Uppercase email strings and leading/trailing whitespace.
-- **Why it matters**: Case-sensitive string joins fail between Source 1 and Source 2.
-- **Task 1 Handling**: `normalize_email()` in `normalizer.py` lowercases, trims whitespace, and validates regex format. Stored in `person_emails` and used as the Tier 1A matching key.
+**How I handled it:** I removed the extra formatting and converted the numbers into a standard 10-digit format. I then used that cleaned phone number for matching people across sources.
 
-#### 10. Categorical Field Variations (`source2_gig_workers.csv` & `source3_cbnexus_contacts.csv`)
+## 8. Different city names and formats
 
-- **Evidence**: S3 Line 2 (`Y`), Line 3 (`yes`), Line 4 (`No`), Line 7 (`Verified`); S2 Line 2 (`Active`), Line 7 (`active`), Line 15 (`paused`).
-- **Problem**: Categorical fields stored as mixed text strings (`Y`, `yes`, `Verified`).
-- **Why it matters**: Prevents boolean filtering and enum queries in database operations.
-- **Task 1 Handling**: `normalize_verified()` maps positive strings (`y`, `yes`, `verified`, `true`) to boolean `TRUE`/`FALSE`. Status strings are trimmed and lowercased. Stored in `candidate_profiles`.
+**Issue:** City names were written with different capitalization, extra spaces, or different names for the same place, such as Gurgaon/Gurugram and Bangalore/Bengaluru.
 
-#### 11. Abbreviated Name vs Full Name (`source1_naukri_applicants.csv`)
+**How I handled it:** I mapped these variations to one standard city name before using the data.
 
-- **Evidence**: S1 Line 26 (`R. Verma`, `rohit.verma13@mailtest.example.org`) vs Line 32 (`Rohit Verma`, `rohit.verma13@mailtest.example.org`).
-- **Problem**: Candidate listed with abbreviated initial (`R. Verma`) on one line and full name (`Rohit Verma`) on another.
-- **Why it matters**: Exact name matching fails to link the abbreviated name record to the full candidate entry.
-- **Task 1 Handling**: Tier 1A Email Match in `resolver.py` anchors both records via identical normalized email address (`rohit.verma13@mailtest.example.org`), consolidating both source records into a single canonical `person` entity.
+## 9. Different email formats
 
----
+**Issue:** Some email addresses were written in uppercase or had extra spaces.
 
-### B. Derived Data Finding
+**How I handled it:** I removed extra spaces and converted emails to lowercase so that the same email could be matched correctly.
 
-The following item represents a genuine discovery derived by cross-referencing attributes across multiple rows:
+## 10. Different ways of writing categories and status values
 
-#### 12. Alternate Emails for Same Individual (`source1_naukri_applicants.csv`)
+**Issue:** Some fields used different values for the same meaning, such as `Y`, `yes`, `Verified`, or `true`.
 
-- **Evidence**: S1 Line 28 (`Nikhil Chopra`, `alt.nikhil.chopra70@example.com`, phone `09000000103`) vs S1 Line 38 (`Nikhil Chopra`, `nikhil.chopra70@example.com`, phone `09000000103`). Both share identical phone, city (`NOIDA`), exp (`0.8`), CTC (`7.8`), and skills (`Pandas, SQL, n8n`).
-- **Problem**: Candidate registered using a secondary/alternate email address.
-- **Why it matters**: Email-only matching would fail to merge these records, creating duplicate candidate profiles.
-- **Task 1 Handling**: Tier 1B Phone Match in `resolver.py` anchors both records via normalized phone `9000000103`, linking both email addresses to a single canonical `person` record while preserving both in `person_emails` (one flagged primary).
+**How I handled it:** I converted these values into a common format, such as a proper true/false value, and standardized status text.
 
----
+## 11. Same person written with a short name and full name
 
-### C. Entity Resolution Risk / Guardrail
+**Issue:** One record used `R. Verma`, while another record used `Rohit Verma`.
 
-The following item represents a safety guardrail implemented to handle identity risks present in the raw data:
+**How I handled it:** Instead of depending on the name, I used the matching email address to identify that both records belonged to the same person.
 
-#### 13. Ambiguous Candidates with Identical Names (`source2_gig_workers.csv` & `source3_cbnexus_contacts.csv`)
+## 12. Same person had two different email addresses
 
-- **Evidence**: S2 Line 15 (`Deepak Nair`, `DEEPAK.NAIR44@EXAMPLE.COM` in Bengaluru) vs S2 Line 32 (`Deepak Nair`, `DEEPAK.NAIR57@EXAMPLE.IN` in New Delhi).
-- **Problem**: Two distinct real-world individuals sharing the exact same name (`Deepak Nair`) across different locations and email domains.
-- **Why it matters**: Naive name-only or name-first matching would incorrectly collapse two distinct individuals into a single corrupted candidate profile.
-- **Task 1 Handling**: Tier 3 Conflict Guardrail in `resolver.py` checks for email/phone contradictions when Name+City matches. When conflicting emails or phone numbers exist, the resolver refuses to merge them, creates **2 distinct canonical `person` entities**, and logs the conflict in `entity_conflicts` with `resolution_strategy = 'SEPARATE_ENTITIES_RETAINED'`.
+**Issue:** Nikhil Chopra appeared with two different email addresses, but the phone number and other details showed that both records belonged to the same person.
+
+**How I handled it:** I used the normalized phone number to connect the two records to one person and kept both email addresses in the database.
+
+## 13. Two different people had the same name
+
+**Issue:** There were two candidates named Deepak Nair, but their other details were different. Automatically merging them just because their names were the same could create a wrong person record.
+
+**How I handled it:** I did not merge them. When the other identifying information conflicted, I kept them as separate people and recorded the conflict for review.
 
 ---
 
@@ -474,106 +443,61 @@ Documentation of the technical challenges encountered during the design and impl
 
 ## Task 5 — Stretch: Scaling to 5,000 Workers
 
-### 1. Overview & Core Objective
-This section presents an architectural analysis of scaling the Task 3 audio collection app to handle 5,000 gig workers submitting recordings over a single weekend. It outlines the specific failure points of the current local/demo setup, proposes a production architecture, and details practical engineering decisions across storage, network uploads, system failures, deduplication, and cost control.
+1. Storage
 
----
+What will break:
+The current app stores audio files on the local computer. This will not work well when thousands of workers are uploading files because the storage can fill up and files can be lost if the server goes down.
 
-### 2. What Breaks First Under Weekend Burst Traffic?
-If 5,000 workers access the current Task 3 application over a weekend, the system will fail across two major bottlenecks:
+What I would do before launch:
+Move audio files to cloud storage such as Amazon S3 or Supabase Storage. Keep only the file path and other details in PostgreSQL.
 
-1. **Web Server Thread Blocking & Memory Saturation**: The current Streamlit application processes uploaded audio files in-memory on the main web process thread. Synchronously decoding audio streams using `pydub` to calculate duration, sample rate, bitrate, and loudness consumes significant CPU and RAM. Concurrent incoming worker uploads will freeze the web server process, causing HTTP request timeouts and server crashes.
-2. **Local Storage & Database Connection Bottlenecks**: Saving files to local disk (`data/audio_uploads/`) prevents scaling the app across multiple server nodes. Furthermore, concurrent unpooled database writes from web workers will exhaust PostgreSQL connection limits (`max_connections`), dropping incoming candidate submissions.
+2. Uploads
 
----
+What will break:
+Thousands of workers may try to upload audio at the same time. Sending all those files through the application server can make the app slow or unavailable.
 
-### 3. Storage Strategy: Cloud Object Storage vs. Local Filesystem
-* **Why Local Storage Fails**: Local server disk storage lacks elasticity, creates a single point of failure, prevents multi-instance horizontal scaling, and risks complete data loss if application containers restart or crash.
-* **Production Storage Architecture**:
-  * Transition all media storage to Cloud Object Storage (such as Amazon S3 or Supabase Storage).
-  * Audio recordings are organized in private buckets using structured object keys: `audio-recordings/{person_id}/{YYYY}/{MM}/{submission_id}.ext`.
-  * Implement bucket lifecycle rules to automatically transition raw uncompressed audio to low-cost archival storage (e.g. Glacier/Coldline) after 30 days.
+What I would do before launch:
+Let workers upload the audio directly to cloud storage and use resumable uploads so a failed upload can continue instead of starting again.
 
----
+3. Audio Processing
 
-### 4. Upload Strategy: Presigned Direct Uploads
-* **The Upload Problem**: Streaming multi-megabyte audio files through web application server memory chokes application bandwidth and worker processes. Unstable mobile connections in remote worker locations lead to frequent upload dropouts.
-* **Direct Resumable Upload Architecture**:
-  * **Presigned Upload URLs**: The mobile browser requests a short-lived presigned upload URL from a lightweight API endpoint, then uploads the audio binary directly from the client browser to Cloud Object Storage.
-  * **Bypassing App Servers**: Web app servers handle zero audio payload traffic; they only issue presigned authorization tokens and receive lightweight completion webhooks.
-  * **Resumable Uploads**: Use multipart upload protocol (e.g. TUS protocol or S3 Multipart) so workers on poor cellular networks can resume interrupted uploads without re-uploading the entire recording from the beginning.
+What will break:
+Processing thousands of audio files at the same time can use a lot of CPU and memory and can slow down the application.
 
----
+What I would do before launch:
+Move audio processing to background workers. The main application should accept the upload quickly and let background workers calculate the audio properties.
 
-### 5. Failure Resilience & Asynchronous Queue Processing
-To isolate web application response times from background media processing:
+4. Failures
 
-* **Decoupled Background Processing**:
-  * When an upload to Object Storage completes, an event triggers an asynchronous background job queue (e.g. Redis Streams or SQS worker pool).
-  * Independent worker processes pull jobs from the queue to run `pydub` acoustic metadata extraction, update PostgreSQL, and generate web-friendly audio previews.
-* **Fault Tolerance & Retries**:
-  * If audio extraction fails or PostgreSQL is temporarily unreachable, background workers retry using exponential backoff.
-  * Jobs failing repeatedly after 5 attempts are routed to a Dead-Letter Queue (DLQ) for alerting and manual engineering review, ensuring zero worker submissions are lost.
-  * **Compensating Disk Cleanup**: If database registration permanently fails, worker handlers delete unreferenced objects from storage to prevent orphaned media accumulation.
+What will break:
+Some uploads, database operations, or audio processing jobs will fail because of network problems or temporary service failures.
 
----
+What I would do before launch:
+Add retries and a way to record failed jobs so they can be checked and processed again without losing submissions.
 
-### 6. Deduplication & Network Retry Guardrails
-Mobile network latency often causes workers to tap "Submit" repeatedly, or browsers to retry dropped HTTP requests automatically.
+5. Duplicate Submissions
 
-* **Client-Side Idempotency Keys**: The frontend web application generates a unique UUID idempotency key per recording session, submitted alongside the presigned URL request. API handlers reject duplicate submissions sharing an active idempotency key.
-* **Cryptographic Content Hashing**: As background workers process incoming audio, they calculate a cryptographic SHA-256 hash of the raw audio bytes. If a worker submits the identical audio file again under a new form submission, the database identifies the duplicate content hash and links the existing submission record without duplicating object storage or re-processing metadata.
+What will break:
+A worker may press the submit button twice or the browser may retry the same request. This can create duplicate submissions.
 
----
+What I would do before launch:
+Use a unique submission ID or idempotency key so the same submission cannot be saved more than once.
 
-### 7. Cost Control & Egress Optimization
-1. **Audio Compression Pipeline**: Background workers convert raw uploaded audio (e.g. uncompressed WAV) into lightweight, compressed 64 kbps mono AAC or MP3 files. This reduces long-term storage and stream bandwidth by up to 80%.
-2. **CDN Edge Caching**: Audio playback in the Submissions Gallery is served via a Cloud Content Delivery Network (CDN) utilizing presigned cached URLs, preventing expensive origin storage egress costs.
-3. **Database Egress Optimization**: PostgreSQL stores relative object keys rather than binary audio blobs or full URLs, keeping database size small and query indexes fast.
+6. Database Load
 
----
+What will break:
+Thousands of submissions can create many database connections and increase the load on PostgreSQL.
 
-### 8. Target Scaled Architecture Flow
+What I would do before launch:
+Use connection pooling and make sure the database is sized for the expected number of workers and requests.
 
-Browser Client
-  │
-  ├─── 1. Requests presigned upload URL ────────► API Gateway / Web Service
-  │                                                      │
-  ├─── 2. Direct audio upload binary ──► Object Storage (S3 / Supabase)
-  │                                           │
-  │                                    3. Object Created Event
-  │                                           ▼
-  │                                     Worker Job Queue
-  │                                           │
-  │                                    4. Pull & Process
-  │                                           ▼
-  │                                 Audio Extraction Workers
-  │                                           │
-  │                                    5. Write Metadata
-  │                                           ▼
-  └────── 6. Stream via CDN ─────────── PostgreSQL Database
+7. Cost
 
----
+What will break:
+Large audio files, storage, processing and data transfer can become expensive at higher usage.
 
-### 9. Reliability, Observability & Connection Pooling
-* **Database Connection Pooling**: Deploy PgBouncer between worker processes and PostgreSQL to manage connection pooling, preventing connection spikes during weekend traffic surges.
-* **Structured Logging & Observability**: Implement central structured JSON logging and APM metrics tracking queue backlog depth, processing latency, audio decoding error rates, and storage growth.
-
----
-
-### 10. Summary: Demo Architecture vs. Production Architecture
-
-| Component | Current Task 3 Demo | Scaled 5,000 Worker Production Architecture |
-| :--- | :--- | :--- |
-| **User Interface** | Streamlit web app | React / Mobile Web App on CDN |
-| **Audio Upload Pathway** | Uploaded through Streamlit web process memory | Direct client-to-bucket upload via Presigned S3 URLs |
-| **Media Storage** | Local filesystem (`data/audio_uploads/`) | Cloud Object Storage with lifecycle rules & Glacier archiving |
-| **Metadata Extraction** | Synchronous Python thread on web server | Asynchronous background worker queue (Redis/SQS + Workers) |
-| **Database Connections** | Direct PostgreSQL connection | Connection-pooled PostgreSQL via PgBouncer |
-| **Failure Recovery** | Compensating local file deletion on insert error | Exponential backoff retries with Dead-Letter Queue (DLQ) |
-| **Deduplication** | Phone lookup & validation checks | Client idempotency keys + SHA-256 audio hash deduplication |
-| **Egress & Playback** | Served directly from local app server disk | Distributed CDN caching with presigned URL authorization |
-
+What I would do before launch:
+Use compressed audio where appropriate, apply storage lifecycle rules, and monitor storage, processing and bandwidth costs.
 ---
 
 ## Submission Checklist
