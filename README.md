@@ -14,7 +14,7 @@ An AI automation repository merging candidate data across disparate systems, res
 | **Task 2** | **Automate with a no-code/low-code tool** | **Core** | **COMPLETED** | n8n workflow JSON export in [n8n/candidate_skill_autotagging_flow.json](file:///Z:/ConsultBae_AI_Automation_Assignment/n8n/candidate_skill_autotagging_flow.json) & auto-classified PostgreSQL database results (`ai_skill_classifications`). |
 | **Task 3** | **Mini audio collection app** | **Core** | **COMPLETED** | Streamlit web app ([src/audio/app.py](file:///Z:/ConsultBae_AI_Automation_Assignment/src/audio/app.py)), metadata extractor ([src/audio/extractor.py](file:///Z:/ConsultBae_AI_Automation_Assignment/src/audio/extractor.py)), PostgreSQL table (`audio_submissions`), and test suite ([tests/test_task3_audio.py](file:///Z:/ConsultBae_AI_Automation_Assignment/tests/test_task3_audio.py)). |
 | **Task 4** | **Data issues report** | **Core** | **COMPLETED** | Complete report embedded in [README.md](#data-issues-report) below. |
-| **Task 5** | **Stretch** | **Optional** | **NOT STARTED** | 1-page no-code architectural write-up for 5,000 gig worker scale. |
+| **Task 5** | **Stretch** | **Optional** | **COMPLETED** | 1-page architectural scaling analysis ([README.md#task-5--stretch-scaling-to-5000-workers](#task-5--stretch-scaling-to-5000-workers)). |
 
 ---
 
@@ -459,22 +459,114 @@ Documentation of the technical challenges encountered during the design and impl
 
 ---
 
-## Task 5 — Stretch
+## Task 5 — Stretch: Scaling to 5,000 Workers
 
-**Status: NOT STARTED**
+### 1. Overview & Core Objective
+This section presents an architectural analysis of scaling the Task 3 audio collection app to handle 5,000 gig workers submitting recordings over a single weekend. It outlines the specific failure points of the current local/demo setup, proposes a production architecture, and details practical engineering decisions across storage, network uploads, system failures, deduplication, and cost control.
 
-*(Optional 1-page no-code architectural scaling analysis for 5,000 gig workers over a weekend load reserved for future implementation).*
+---
+
+### 2. What Breaks First Under Weekend Burst Traffic?
+If 5,000 workers access the current Task 3 application over a weekend, the system will fail across two major bottlenecks:
+
+1. **Web Server Thread Blocking & Memory Saturation**: The current Streamlit application processes uploaded audio files in-memory on the main web process thread. Synchronously decoding audio streams using `pydub` to calculate duration, sample rate, bitrate, and loudness consumes significant CPU and RAM. Concurrent incoming worker uploads will freeze the web server process, causing HTTP request timeouts and server crashes.
+2. **Local Storage & Database Connection Bottlenecks**: Saving files to local disk (`data/audio_uploads/`) prevents scaling the app across multiple server nodes. Furthermore, concurrent unpooled database writes from web workers will exhaust PostgreSQL connection limits (`max_connections`), dropping incoming candidate submissions.
+
+---
+
+### 3. Storage Strategy: Cloud Object Storage vs. Local Filesystem
+* **Why Local Storage Fails**: Local server disk storage lacks elasticity, creates a single point of failure, prevents multi-instance horizontal scaling, and risks complete data loss if application containers restart or crash.
+* **Production Storage Architecture**:
+  * Transition all media storage to Cloud Object Storage (such as Amazon S3 or Supabase Storage).
+  * Audio recordings are organized in private buckets using structured object keys: `audio-recordings/{person_id}/{YYYY}/{MM}/{submission_id}.ext`.
+  * Implement bucket lifecycle rules to automatically transition raw uncompressed audio to low-cost archival storage (e.g. Glacier/Coldline) after 30 days.
+
+---
+
+### 4. Upload Strategy: Presigned Direct Uploads
+* **The Upload Problem**: Streaming multi-megabyte audio files through web application server memory chokes application bandwidth and worker processes. Unstable mobile connections in remote worker locations lead to frequent upload dropouts.
+* **Direct Resumable Upload Architecture**:
+  * **Presigned Upload URLs**: The mobile browser requests a short-lived presigned upload URL from a lightweight API endpoint, then uploads the audio binary directly from the client browser to Cloud Object Storage.
+  * **Bypassing App Servers**: Web app servers handle zero audio payload traffic; they only issue presigned authorization tokens and receive lightweight completion webhooks.
+  * **Resumable Uploads**: Use multipart upload protocol (e.g. TUS protocol or S3 Multipart) so workers on poor cellular networks can resume interrupted uploads without re-uploading the entire recording from the beginning.
+
+---
+
+### 5. Failure Resilience & Asynchronous Queue Processing
+To isolate web application response times from background media processing:
+
+* **Decoupled Background Processing**:
+  * When an upload to Object Storage completes, an event triggers an asynchronous background job queue (e.g. Redis Streams or SQS worker pool).
+  * Independent worker processes pull jobs from the queue to run `pydub` acoustic metadata extraction, update PostgreSQL, and generate web-friendly audio previews.
+* **Fault Tolerance & Retries**:
+  * If audio extraction fails or PostgreSQL is temporarily unreachable, background workers retry using exponential backoff.
+  * Jobs failing repeatedly after 5 attempts are routed to a Dead-Letter Queue (DLQ) for alerting and manual engineering review, ensuring zero worker submissions are lost.
+  * **Compensating Disk Cleanup**: If database registration permanently fails, worker handlers delete unreferenced objects from storage to prevent orphaned media accumulation.
+
+---
+
+### 6. Deduplication & Network Retry Guardrails
+Mobile network latency often causes workers to tap "Submit" repeatedly, or browsers to retry dropped HTTP requests automatically.
+
+* **Client-Side Idempotency Keys**: The frontend web application generates a unique UUID idempotency key per recording session, submitted alongside the presigned URL request. API handlers reject duplicate submissions sharing an active idempotency key.
+* **Cryptographic Content Hashing**: As background workers process incoming audio, they calculate a cryptographic SHA-256 hash of the raw audio bytes. If a worker submits the identical audio file again under a new form submission, the database identifies the duplicate content hash and links the existing submission record without duplicating object storage or re-processing metadata.
+
+---
+
+### 7. Cost Control & Egress Optimization
+1. **Audio Compression Pipeline**: Background workers convert raw uploaded audio (e.g. uncompressed WAV) into lightweight, compressed 64 kbps mono AAC or MP3 files. This reduces long-term storage and stream bandwidth by up to 80%.
+2. **CDN Edge Caching**: Audio playback in the Submissions Gallery is served via a Cloud Content Delivery Network (CDN) utilizing presigned cached URLs, preventing expensive origin storage egress costs.
+3. **Database Egress Optimization**: PostgreSQL stores relative object keys rather than binary audio blobs or full URLs, keeping database size small and query indexes fast.
+
+---
+
+### 8. Target Scaled Architecture Flow
+
+Browser Client
+  │
+  ├─── 1. Requests presigned upload URL ────────► API Gateway / Web Service
+  │                                                      │
+  ├─── 2. Direct audio upload binary ──► Object Storage (S3 / Supabase)
+  │                                           │
+  │                                    3. Object Created Event
+  │                                           ▼
+  │                                     Worker Job Queue
+  │                                           │
+  │                                    4. Pull & Process
+  │                                           ▼
+  │                                 Audio Extraction Workers
+  │                                           │
+  │                                    5. Write Metadata
+  │                                           ▼
+  └────── 6. Stream via CDN ─────────── PostgreSQL Database
+
+---
+
+### 9. Reliability, Observability & Connection Pooling
+* **Database Connection Pooling**: Deploy PgBouncer between worker processes and PostgreSQL to manage connection pooling, preventing connection spikes during weekend traffic surges.
+* **Structured Logging & Observability**: Implement central structured JSON logging and APM metrics tracking queue backlog depth, processing latency, audio decoding error rates, and storage growth.
+
+---
+
+### 10. Summary: Demo Architecture vs. Production Architecture
+
+| Component | Current Task 3 Demo | Scaled 5,000 Worker Production Architecture |
+| :--- | :--- | :--- |
+| **User Interface** | Streamlit web app | React / Mobile Web App on CDN |
+| **Audio Upload Pathway** | Uploaded through Streamlit web process memory | Direct client-to-bucket upload via Presigned S3 URLs |
+| **Media Storage** | Local filesystem (`data/audio_uploads/`) | Cloud Object Storage with lifecycle rules & Glacier archiving |
+| **Metadata Extraction** | Synchronous Python thread on web server | Asynchronous background worker queue (Redis/SQS + Workers) |
+| **Database Connections** | Direct PostgreSQL connection | Connection-pooled PostgreSQL via PgBouncer |
+| **Failure Recovery** | Compensating local file deletion on insert error | Exponential backoff retries with Dead-Letter Queue (DLQ) |
+| **Deduplication** | Phone lookup & validation checks | Client idempotency keys + SHA-256 audio hash deduplication |
+| **Egress & Playback** | Served directly from local app server disk | Distributed CDN caching with presigned URL authorization |
 
 ---
 
 ## Submission Checklist
 
 - [x] **GitHub repository** with incremental commit history
-- [x] **README.md** with setup guide + Data Issues Report + Stuck Log
-- [x] **Task 1 — Merge**: COMPLETED (`src/app/main.py` & `tests/test_task1.py`)
-- [x] **Task 2 — Automate with a no-code/low-code tool**: COMPLETED (`n8n/candidate_skill_autotagging_flow.json` & `ai_skill_classifications`)
-- [x] **Task 3 — Mini audio collection app**: COMPLETED (`src/audio/app.py` & `audio_submissions`)
-- [x] **Task 4 — Data issues report**: COMPLETED (Embedded in [`README.md#data-issues-report`](#data-issues-report))
-- [ ] **Task 5 — Stretch**: NOT STARTED / OPTIONAL
+- [x] **README.md** with setup guide + Data Issues Report + Stuck Log + Task 5 Scaling Write-Up
+- [x] **Task 2 n8n workflow JSON** exported into repo ([`n8n/candidate_skill_autotagging_flow.json`](file:///z:/ConsultBae_AI_Automation_Assignment/n8n/candidate_skill_autotagging_flow.json))
 - [ ] **Screen recording** ($\le$ 6 minutes, voice required, face optional)
 - [ ] **Final email reply** containing repository link + video link before deadline
