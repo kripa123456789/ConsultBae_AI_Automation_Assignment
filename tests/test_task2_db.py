@@ -1,3 +1,9 @@
+"""
+Database schema and relational constraint unit tests for Task 2 ai_skill_classifications table.
+Note: This test file validates PostgreSQL table structure, UNIQUE constraints, and FOREIGN KEY constraints only.
+It does not execute or validate the external n8n no-code workflow.
+"""
+
 import os
 import tempfile
 import pytest
@@ -36,14 +42,14 @@ class TestTask2DatabaseSchema:
             INSERT INTO ai_skill_classifications (person_id, category, confidence, reason, model)
             VALUES (%s, %s, %s, %s, %s);
             """,
-            (pid, 'automation-heavy', 0.95, 'Expert in n8n and Python automation', 'gpt-4o-mini')
+            (pid, 'automation-heavy', 0.95, 'Expert in n8n and Python automation', 'Gemini')
         )
         row = conn.execute("SELECT * FROM ai_skill_classifications WHERE person_id = %s;", (pid,)).fetchone()
         assert row is not None
         assert row["category"] == "automation-heavy"
         assert abs(row["confidence"] - 0.95) < 0.001
         assert row["reason"] == "Expert in n8n and Python automation"
-        assert row["model"] == "gpt-4o-mini"
+        assert row["model"] == "Gemini"
 
     def test_ai_skill_classifications_unique_person_id_constraint(self, test_db):
         conn, _ = test_db
@@ -60,7 +66,7 @@ class TestTask2DatabaseSchema:
             INSERT INTO ai_skill_classifications (person_id, category, confidence, reason, model)
             VALUES (%s, %s, %s, %s, %s);
             """,
-            (pid, 'web dev', 0.90, 'React and Node expertise', 'gpt-4o-mini')
+            (pid, 'web-dev', 0.90, 'React and Node expertise', 'Gemini')
         )
 
         # Second insert for the exact same person_id must fail unique constraint
@@ -70,7 +76,7 @@ class TestTask2DatabaseSchema:
                 INSERT INTO ai_skill_classifications (person_id, category, confidence, reason, model)
                 VALUES (%s, %s, %s, %s, %s);
                 """,
-                (pid, 'data', 0.85, 'Pandas and SQL expertise', 'gpt-4o-mini')
+                (pid, 'data', 0.85, 'Pandas and SQL expertise', 'Gemini')
             )
 
     def test_ai_skill_classifications_foreign_key_constraint(self, test_db):
@@ -82,5 +88,5 @@ class TestTask2DatabaseSchema:
                 INSERT INTO ai_skill_classifications (person_id, category, confidence, reason, model)
                 VALUES (%s, %s, %s, %s, %s);
                 """,
-                (invalid_pid, 'data', 0.90, 'Invalid person reference', 'gpt-4o-mini')
+                (invalid_pid, 'data', 0.90, 'Invalid person reference', 'Gemini')
             )

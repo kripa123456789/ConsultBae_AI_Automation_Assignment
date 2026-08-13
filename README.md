@@ -320,6 +320,51 @@ Documentation of the technical challenges encountered during the design and impl
 
 ---
 
+### Challenge 4: n8n Postgres Write Node Override (`classification_id = 0`)
+* **Problem**: During the initial single-candidate Task 2 test run in n8n, candidate `person_id = 1` was inserted into Supabase PostgreSQL with `classification_id = 0` instead of starting from `1` via PostgreSQL's `SERIAL` sequence.
+* **What I Tried**:
+  * Inspected `database/schema.sql` and PostgreSQL catalog via `information_schema.columns` / `sequences` to check if `classification_id` was missing default sequence expressions. Confirmed `classification_id` was correctly defined as `SERIAL PRIMARY KEY`.
+* **What I Searched / Asked AI**:
+  * Investigated n8n Postgres node payload field mapping behavior when auto-mapping table schemas.
+* **What Worked**:
+  * Identified that n8n's Edit Fields / Postgres node automatically included `classification_id: 0` in the write payload, overriding PostgreSQL's `DEFAULT nextval(...)` sequence.
+  * Removed `classification_id` from n8n's Edit Fields output and Postgres node mapping configuration, leaving `person_id` as the match key and passing only data attributes (`category`, `confidence`, `reason`, `model`).
+  * Corrected candidate `person_id = 1`'s record in Supabase to `classification_id = 1` and synchronized sequence `ai_skill_classifications_classification_id_seq` via `setval(...)`.
+* **What I Rejected & Why**:
+  * Rejected re-executing DDL schema scripts because catalog inspection proved the schema sequence was already intact.
+* **Final Result**: Omitting `classification_id` from write payloads allowed PostgreSQL to manage sequences natively, ensuring reliable sequential IDs across all 56 records (`1..56`).
+
+---
+
+### Challenge 5: Google Gemini API Rate-Limiting (HTTP 429)
+* **Problem**: Sending all unclassified candidate skills through the Gemini Chat Model node in batch mode triggered HTTP 429 / Rate Limit Exceeded errors from Google Gemini's free-tier endpoint.
+* **What I Tried**:
+  * Executed the workflow without concurrency throttling; received API rate limit rejections after the first few candidate items.
+* **What I Searched / Asked AI**:
+  * Evaluated n8n flow-control constructs for rate-limiting LangChain LLM nodes.
+* **What Worked**:
+  * Redesigned the workflow by introducing a **Loop Over Items** (`splitInBatches` node with batch size = 1) combined with a **Wait** node (1-second delay between loop iterations).
+  * Candidate records are fetched from SQL, iterated serially item-by-item, passed to Gemini, written back to PostgreSQL, and paused briefly before iterating to the next candidate.
+* **What I Rejected & Why**:
+  * Rejected single-prompt mega-batching (combining all 56 candidates into one prompt) because it reduces classification precision, risks context truncation, and fails structured output validation per candidate.
+* **Final Result**: All 56 candidates were processed sequentially with 0 rate-limit rejections and written to Supabase `ai_skill_classifications`.
+
+---
+
+### Challenge 6: Manual Verification vs. Trusting Workflow Automation
+* **Problem**: No-code workflow tools (like n8n) can visually display a green "Success" execution badge even if individual data fields inside the write payload contain logical errors (e.g., `classification_id = 0` or missing timestamps).
+* **What I Tried**:
+  * Inspected n8n execution log UI, which showed successful node completions.
+* **What I Searched / Asked AI**:
+  * Formulated SQL validation queries to audit downstream PostgreSQL table state directly via `psycopg2`.
+* **What Worked**:
+  * Created an independent Python/SQL database verification suite (`verify_phase2.py`) querying Supabase directly after workflow completion to validate row counts, unique constraints, distinct categories, null field checks, and primary key sequence ranges.
+* **What I Rejected & Why**:
+  * Rejected relying solely on UI completion badges because UI indicators confirm execution status, not data payload correctness.
+* **Final Result**: Independent database inspection provided empirical proof of correctness and caught the `classification_id = 0` issue before full-batch execution.
+
+---
+
 ## Task 5 — Stretch
 
 **Status: NOT STARTED**

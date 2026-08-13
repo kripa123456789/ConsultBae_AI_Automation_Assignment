@@ -267,6 +267,7 @@
     },
     {
       "parameters": {
+        "batchSize": 1,
         "options": {}
       },
       "type": "n8n-nodes-base.splitInBatches",
@@ -279,7 +280,10 @@
       "name": "Loop Over Items"
     },
     {
-      "parameters": {},
+      "parameters": {
+        "amount": 1,
+        "unit": "seconds"
+      },
       "type": "n8n-nodes-base.wait",
       "typeVersion": 1.1,
       "position": [
