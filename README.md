@@ -118,7 +118,7 @@ Create a simple web interface allowing gig workers to submit audio recordings, a
 
 ---
 
-# Data Issues Report
+# Task 4 - Data Issues Report
 
 While working with the three source files, I found several problems in the data. I cleaned, corrected, or safely handled these problems before using the data for matching and storing it in the database.
 
@@ -278,6 +278,7 @@ Large audio files, storage, processing and data transfer can become expensive at
 
 What I would do before launch:
 Use compressed audio where appropriate, apply storage lifecycle rules, and monitor storage, processing and bandwidth costs.
+
 ---
 
 ## Submission Checklist
