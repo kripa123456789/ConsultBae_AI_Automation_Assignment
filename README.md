@@ -9,8 +9,8 @@ An AI automation pipeline and web application designed to merge candidate data a
 | Task | Title | Status | Deliverables |
 | :-: | :--- | :-: | :--- |
 | **Task 1** | **Merge & Data Normalization** | **COMPLETED** | PostgreSQL schema DDL, Python ingestion & normalization pipeline, tiered entity resolution, unit test suite. |
-| **Task 2** | **No-Code AI Automation** | **COMPLETED** | n8n workflow export ([`n8n/candidate_skill_autotagging_flow.json`](file:///z:/ConsultBae_AI_Automation_Assignment/n8n/candidate_skill_autotagging_flow.json)) & auto-classified candidate skill database records. |
-| **Task 3** | **Mini Audio Collection App** | **COMPLETED** | Streamlit web application ([`src/audio/app.py`](file:///z:/ConsultBae_AI_Automation_Assignment/src/audio/app.py)), metadata extractor ([`src/audio/extractor.py`](file:///z:/ConsultBae_AI_Automation_Assignment/src/audio/extractor.py)), `audio_submissions` database table, and unit test suite. |
+| **Task 2** | **No-Code AI Automation** | **COMPLETED** | n8n workflow export ([`n8n/candidate_skill_autotagging_flow.json`](n8n/candidate_skill_autotagging_flow.json)) & auto-classified candidate skill database records. |
+| **Task 3** | **Mini Audio Collection App** | **COMPLETED** | Streamlit web application ([`src/audio/app.py`](src/audio/app.py)), metadata extractor ([`src/audio/extractor.py`](src/audio/extractor.py)), `audio_submissions` database table, and unit test suite. |
 | **Task 4** | **Data Issues Report** | **COMPLETED** | Complete 13-item data quality analysis embedded in [Data Issues Report](#data-issues-report) below. |
 | **Task 5** | **Stretch Architecture Exercise** | **COMPLETED** | 1-page scaling analysis for 5,000 workers embedded in [Task 5 — Stretch](#task-5--stretch-scaling-to-5000-workers) below. |
 
@@ -93,8 +93,8 @@ Automatically analyze candidate skills stored in PostgreSQL and classify each ca
 * **Platform**: Built using **n8n** connected to Google Gemini LLM and PostgreSQL.
 * **Workflow Logic**: Reads unclassified candidate skills from PostgreSQL, passes them to Gemini via a structured JSON output prompt, extracts the category, confidence rating, and explanation, and writes the results back to the database.
 * **Categories**: Classifies profiles into 7 categories: `backend`, `web-dev`, `full-stack`, `data`, `ai-ml`, `automation-heavy`, or `other`.
-* **Rate Limiting**: Used an n8n loop with a 1-second delay between items to adhere to API rate limits without failing requests.
-* **Results**: Successfully classified all **56 canonical candidates** into table `ai_skill_classifications`. The complete exported workflow is saved at [`n8n/candidate_skill_autotagging_flow.json`](file:///z:/ConsultBae_AI_Automation_Assignment/n8n/candidate_skill_autotagging_flow.json).
+* **Rate Limiting**: Used an n8n loop with a 5-second delay between items to adhere to API rate limits without failing requests.
+* **Results**: Successfully classified all **56 canonical candidates** into table `ai_skill_classifications`. The complete exported workflow is saved at [`n8n/candidate_skill_autotagging_flow.json`](n8n/candidate_skill_autotagging_flow.json).
 
 ---
 
@@ -284,6 +284,6 @@ Use compressed audio where appropriate, apply storage lifecycle rules, and monit
 
 - [x] **GitHub repository** with clean commit history
 - [x] **README.md** with setup guide, Data Issues Report, Stuck Log, and Task 5 Scaling Write-Up
-- [x] **Task 2 n8n workflow JSON** exported in repository ([`n8n/candidate_skill_autotagging_flow.json`](file:///z:/ConsultBae_AI_Automation_Assignment/n8n/candidate_skill_autotagging_flow.json))
+- [x] **Task 2 n8n workflow JSON** exported in repository ([`n8n/candidate_skill_autotagging_flow.json`](n8n/candidate_skill_autotagging_flow.json))
 - [ ] **Screen recording** ($\le$ 6 minutes, voice required)
 - [ ] **Final email submission** with repository link + video link before deadline
