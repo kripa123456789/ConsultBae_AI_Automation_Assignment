@@ -1,53 +1,51 @@
-# ConsultBae — AI Automation Take-Home Assignment
+# ConsultBae — AI Automation Assignment
 
-An AI automation repository merging candidate data across disparate systems, resolving candidate identities without common keys, handling data quality anomalies with complete source lineage, and building downstream automation workflows.
-
----
-
-## Assignment Tasks & Implementation Status
-
-*(Authoritative Reference: `assignment/ConsultBae_Assignment_Rulebook.pdf`)*
-
-| Task | Title | Core / Optional | Status | Key Deliverables / Artifacts |
-| :-: | :--- | :-: | :-: | :--- |
-| **Task 1** | **Merge** | **Core** | **COMPLETED** | PostgreSQL schema ([database/schema.sql](file:///Z:/ConsultBae_AI_Automation_Assignment/database/schema.sql)), Ingestion & Normalization pipeline ([src/ingestion/](file:///Z:/ConsultBae_AI_Automation_Assignment/src/ingestion/)), 3-Tier Entity Resolution engine ([src/matching/](file:///Z:/ConsultBae_AI_Automation_Assignment/src/matching/)), automated test suite ([tests/test_task1.py](file:///Z:/ConsultBae_AI_Automation_Assignment/tests/test_task1.py)). |
-| **Task 2** | **Automate with a no-code/low-code tool** | **Core** | **COMPLETED** | n8n workflow JSON export in [n8n/candidate_skill_autotagging_flow.json](file:///Z:/ConsultBae_AI_Automation_Assignment/n8n/candidate_skill_autotagging_flow.json) & auto-classified PostgreSQL database results (`ai_skill_classifications`). |
-| **Task 3** | **Mini audio collection app** | **Core** | **COMPLETED** | Streamlit web app ([src/audio/app.py](file:///Z:/ConsultBae_AI_Automation_Assignment/src/audio/app.py)), metadata extractor ([src/audio/extractor.py](file:///Z:/ConsultBae_AI_Automation_Assignment/src/audio/extractor.py)), PostgreSQL table (`audio_submissions`), and test suite ([tests/test_task3_audio.py](file:///Z:/ConsultBae_AI_Automation_Assignment/tests/test_task3_audio.py)). |
-| **Task 4** | **Data issues report** | **Core** | **COMPLETED** | Complete report embedded in [README.md](#data-issues-report) below. |
-| **Task 5** | **Stretch** | **Optional** | **COMPLETED** | 1-page architectural scaling analysis ([README.md#task-5--stretch-scaling-to-5000-workers](#task-5--stretch-scaling-to-5000-workers)). |
+An AI automation pipeline and web application designed to merge candidate data across disparate source systems, automate skill tagging using AI, and collect gig worker audio submissions.
 
 ---
 
-## Setup & Execution Guide
+## Assignment Tasks & Overview
+
+| Task | Title | Status | Deliverables |
+| :-: | :--- | :-: | :--- |
+| **Task 1** | **Merge & Data Normalization** | **COMPLETED** | PostgreSQL schema DDL, Python ingestion & normalization pipeline, tiered entity resolution, unit test suite. |
+| **Task 2** | **No-Code AI Automation** | **COMPLETED** | n8n workflow export ([`n8n/candidate_skill_autotagging_flow.json`](file:///z:/ConsultBae_AI_Automation_Assignment/n8n/candidate_skill_autotagging_flow.json)) & auto-classified candidate skill database records. |
+| **Task 3** | **Mini Audio Collection App** | **COMPLETED** | Streamlit web application ([`src/audio/app.py`](file:///z:/ConsultBae_AI_Automation_Assignment/src/audio/app.py)), metadata extractor ([`src/audio/extractor.py`](file:///z:/ConsultBae_AI_Automation_Assignment/src/audio/extractor.py)), `audio_submissions` database table, and unit test suite. |
+| **Task 4** | **Data Issues Report** | **COMPLETED** | Complete 13-item data quality analysis embedded in [Data Issues Report](#data-issues-report) below. |
+| **Task 5** | **Stretch Architecture Exercise** | **COMPLETED** | 1-page scaling analysis for 5,000 workers embedded in [Task 5 — Stretch](#task-5--stretch-scaling-to-5000-workers) below. |
+
+---
+
+## Quick Start & Setup Guide
 
 ### Prerequisites
 * Python 3.10+
-* PostgreSQL database instance (or Supabase PostgreSQL connection)
+* PostgreSQL database instance (local PostgreSQL or cloud Supabase instance)
 
-### 1. Clone Repository & Set Up Environment
+### 1. Installation
 ```bash
-git clone https://github.com/your-username/ConsultBae_AI_Automation_Assignment.git
+# Clone the repository
+git clone https://github.com/kripa123456789/ConsultBae_AI_Automation_Assignment.git
 cd ConsultBae_AI_Automation_Assignment
 
-# Create virtual environment
+# Create and activate virtual environment
 python -m venv .venv
-# Activate virtual environment (Windows PowerShell)
-.\.venv\Scripts\Activate.ps1
-# Activate virtual environment (Linux/macOS)
-# source .venv/bin/activate
+.\.venv\Scripts\Activate.ps1  # On Windows PowerShell
+# source .venv/bin/activate   # On Linux/macOS
 
 # Install dependencies
 pip install -r requirements.txt
 ```
 
-### 2. Configure Environment Variables
-Copy `.env.example` to `.env` and fill in your PostgreSQL credentials (e.g. Supabase connection details):
+### 2. Environment Configuration
+Copy `.env.example` to `.env` and fill in your PostgreSQL credentials:
 ```bash
 cp .env.example .env
 ```
+
 Ensure your `.env` contains:
 ```env
-POSTGRES_HOST=aws-0-ap-south-1.pooler.supabase.com
+POSTGRES_HOST=your_postgres_host
 POSTGRES_PORT=5432
 POSTGRES_DB=postgres
 POSTGRES_USER=your_user
@@ -55,176 +53,68 @@ POSTGRES_PASSWORD=your_password
 POSTGRES_SSLMODE=require
 ```
 
-### 3. Run Task 1 Ingestion & Entity Resolution Pipeline
-To initialize the database schema and execute the ETL pipeline:
+### 3. Run Pipeline & Verify Tests
 ```bash
+# Run Task 1 database initialization and data merging pipeline
 python -m src.app.main --reset
-```
 
-### 4. Run Automated Test Suite
-To verify pipeline normalization, anomaly recovery, entity resolution, and idempotency:
-```bash
-python -m pytest tests/test_task1.py
-```
-*(All 15 unit and end-to-end integration tests pass cleanly).*
+# Run all 27 automated unit and integration tests
+python -m pytest
 
----
-
-## Task 2 — Automate with a No-Code/Low-Code Tool
-
-### 1. Objective
-Automate downstream candidate processing by integrating PostgreSQL canonical candidate data with an AI model via a no-code/low-code workflow engine. Unclassified candidates and their aggregated skills are evaluated by an LLM to automatically categorize candidate profiles into standardized engineering categories and write results back to PostgreSQL.
-
-### 2. Why n8n Was Chosen
-n8n was selected as the automation platform because it is open-source, self-hostable, natively supports complex database nodes (PostgreSQL with parameter mapping & upsert logic), features native LangChain nodes (LLM chains, Gemini chat models, structured JSON output parsers), and supports flow control constructs (`Loop Over Items` and `Wait` nodes) required for API rate-limit management.
-
-### 3. High-Level Workflow Architecture
-```
-[Schedule Trigger]
-       ↓
-[Postgres: Execute Query]  ── Fetches unclassified candidates & aggregated skills
-       ↓
-[Loop Over Items]          ── Processes candidates item-by-item (batch size = 1)
-       ↓
-[Basic LLM Chain]          ── Sends candidate skills prompt to Gemini Chat Model
-   ├── Google Gemini Chat Model
-   └── Structured Output Parser
-       ↓
-[Edit Fields]              ── Formats person_id, category, confidence, reason, model
-       ↓
-[Postgres: Insert or Update] ── Upserts into ai_skill_classifications (match key: person_id)
-       ↓
-[Wait]                     ── 1-second rate-limiting delay per candidate
-       ↓
-(Loops back to Loop Over Items until all items processed)
-```
-
-### 4. Node-by-Node Explanation
-1. **Schedule Trigger**: Triggers execution automatically (or manually on demand).
-2. **Execute a SQL Query (Postgres Node)**: Aggregates skills per canonical candidate using `STRING_AGG(DISTINCT cs.skill_name, ', ')` where `ai_skill_classifications.person_id IS NULL`.
-3. **Loop Over Items (SplitInBatches Node)**: Iterates over candidate records one at a time to prevent API rate spikes.
-4. **Basic LLM Chain (LangChain Node)**: Constructs prompt passing candidate name and skill list.
-5. **Google Gemini Chat Model (LM Node)**: Connects to `models/gemini-3.5-flash-lite` (or equivalent Gemini model) via Google PaLM API.
-6. **Structured Output Parser (LangChain Node)**: Enforces JSON schema response format matching `{category, confidence, reason}`.
-7. **Edit Fields (Set Node)**: Maps original candidate `person_id` from the SQL query node together with LLM output attributes (`category`, `confidence`, `reason`) and sets `model = 'Gemini'`.
-8. **Insert or Update Rows in a Table (Postgres Node)**: Executes an upsert into table `ai_skill_classifications` matching on `person_id`. `classification_id` is excluded from the node mapping so PostgreSQL's native `SERIAL` sequence automatically generates sequential primary keys (`1..56`).
-9. **Wait Node**: Introduces a controlled delay between item iterations to adhere to Google Gemini API free-tier RPM rate limits.
-
-### 5. Gemini Classification Categories
-Candidates are classified into exactly one of seven permitted categories:
-* `automation-heavy`
-* `web-dev`
-* `data`
-* `backend`
-* `ai-ml`
-* `full-stack`
-* `other`
-
-### 6. Structured Output & Explainability Note
-The structured JSON output extracted from Gemini includes:
-* `category`: Exact string matching one of the 7 allowed categories.
-* `confidence`: Model-reported confidence score between 0.0 and 1.0. *(Note: Confidence and reason fields were intentionally added as engineering enhancements for model explainability and auditability; they were not explicitly required by the assignment rulebook. Confidence represents a model-reported rating, not a statistically calibrated probability).*
-* `reason`: Concise natural language explanation of why the category was assigned based on candidate skills.
-
-### 7. PostgreSQL Write-Back & Upsert Behavior
-Results are written back into table `ai_skill_classifications`. The Postgres node is configured with **Insert or Update** mode on matching column `person_id`. This ensures idempotency: re-running the workflow updates existing classifications without duplicating rows. `classification_id` is auto-generated by PostgreSQL's `SERIAL` sequence, and timestamps (`created_at`, `updated_at`) are automatically set by PostgreSQL default expressions.
-
-### 8. Rate-Limit Handling
-Initial batch execution triggered HTTP 429 / Rate Limit errors from the Gemini API when processing many candidates simultaneously. To resolve this, the workflow was structured using `Loop Over Items` paired with a `Wait` node. This guarantees serial, single-candidate requests spaced apart, ensuring 100% completion without API throttling failures.
-
-### 9. Verification & Execution Results
-* **Total Candidates Classified**: All **56 canonical person profiles** successfully processed.
-* **Database State**: `SELECT COUNT(*) FROM ai_skill_classifications;` = `56`.
-* **Integrity**: `0` duplicate `person_id` records, `0` null values in essential fields (`person_id`, `category`, `model`), `56` distinct auto-incremented `classification_id` values (`1..56`).
-
-### 10. Workflow Export Location
-The complete n8n workflow export is committed in the repository at:
-[n8n/candidate_skill_autotagging_flow.json](file:///z:/ConsultBae_AI_Automation_Assignment/n8n/candidate_skill_autotagging_flow.json)
-
-### 11. Import & Setup Instructions
-1. Open local or hosted n8n instance (`http://localhost:5678`).
-2. Select **Workflows** $\rightarrow$ **Import from File** and select `n8n/candidate_skill_autotagging_flow.json`.
-3. Configure credentials:
-   * **Postgres Account**: Set host, port, database name, user, password, and SSL (`require`).
-   * **Google Gemini API Account**: Set Google Gemini API key.
-4. Execute workflow.
-
-> [!IMPORTANT]
-> **Credential Security**: All credential identifiers in `candidate_skill_autotagging_flow.json` are sanitized local references. Real database credentials and Gemini API keys must be configured inside your local n8n instance and are never committed to Git.
-
----
-
-## Task 3 — Mini Audio Collection App
-
-### 1. Objective
-Build a web application enabling gig workers to submit audio recordings (via file upload or browser recording), link submissions directly to the canonical candidate database from Task 1 via phone identity lookup, automatically analyze and store acoustic metadata properties (duration, sample rate, bitrate, loudness), and provide a gallery view with inline browser audio playback.
-
-### 2. Architecture & Technology Stack
-* **UI Framework**: **Streamlit** ([`src/audio/app.py`](file:///Z:/ConsultBae_AI_Automation_Assignment/src/audio/app.py)) providing dual-tab form and gallery views.
-* **Audio Extraction Engine**: **`pydub`** ([`src/audio/extractor.py`](file:///Z:/ConsultBae_AI_Automation_Assignment/src/audio/extractor.py)) analyzing uncompressed and compressed audio streams (`.wav`, `.mp3`, `.m4a`, `.ogg`, `.webm`, `.flac`, `.aac`).
-* **Database & Identity Linkage**: PostgreSQL table `audio_submissions` linked to canonical candidate table `persons` via FOREIGN KEY (`person_id`).
-* **File Storage**: Local filesystem storage in `data/audio_uploads/` with UUID timestamped filenames (`audio_{person_id}_{YYYYMMDDTHHMMSS}_{uuid[:8]}.ext`). `data/audio_uploads/` is tracked in `.gitignore` to prevent committing user audio files.
-
-### 3. Database Schema (`audio_submissions`)
-Defined in [`database/schema.sql`](file:///Z:/ConsultBae_AI_Automation_Assignment/database/schema.sql#L164-L177):
-```sql
-CREATE TABLE IF NOT EXISTS audio_submissions (
-    submission_id SERIAL PRIMARY KEY,
-    person_id INT NOT NULL REFERENCES persons(person_id) ON DELETE CASCADE,
-    original_filename VARCHAR(255) NOT NULL,
-    file_path TEXT NOT NULL,
-    file_size_bytes BIGINT NOT NULL,
-    duration_seconds DOUBLE PRECISION NOT NULL,
-    sample_rate_khz DOUBLE PRECISION NOT NULL,
-    bitrate_kbps DOUBLE PRECISION NOT NULL,
-    loudness_db DOUBLE PRECISION NOT NULL,
-    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE INDEX IF NOT EXISTS idx_audio_submissions_person ON audio_submissions(person_id);
-```
-
-### 4. Canonical Identity Resolution & Validation Rules
-1. **Normalization & Identity Lookup**: Candidate name is normalized and checked that it is non-empty; candidate phone is normalized using `normalize_phone()` (extracting clean 10-digit string). Existing candidates are resolved primarily by normalized phone number.
-2. **Identity Lookup**: Searches `person_phones` and `persons` tables for existing canonical candidate matching the normalized phone number.
-3. **Guardrails**:
-   * If **0 candidates match**: Shows validation error `"Candidate not found for phone number 'X'. Please verify the phone number."`
-   * If **>1 candidates match**: Shows ambiguity error preventing corrupted identity merges.
-   * If **1 candidate matches**: Obtains `person_id` and links submission.
-4. **Compensating Disk Cleanup**: If database insertion fails after saving the file to disk, the application provides compensating cleanup by deleting the newly created audio file from `data/audio_uploads/` so failed database writes do not normally leave orphaned audio files.
-
-### 5. Automated Audio Metadata Extraction
-For every submission, `extract_audio_metadata()` decodes the audio stream and computes:
-* **Duration (seconds)**: `round(len(audio_segment) / 1000.0, 3)`
-* **Sample Rate (kHz)**: `round(audio_segment.frame_rate / 1000.0, 2)`
-* **Bitrate (kbps)**: `round((file_size_bytes * 8.0) / duration_seconds / 1000.0, 2)`
-* **Loudness (dBFS)**: `round(audio_segment.dBFS, 2)`. An application-level -99 dBFS floor is used to keep non-finite loudness values out of the database and UI.
-
-### 6. Application Views
-* **View 1 — Submit Audio (`📤 Submit Audio`)**:
-  * Fields: Candidate Name, Phone Number, Audio File Upload / Browser Recording.
-  * Workflow: Validates fields $\rightarrow$ normalizes phone $\rightarrow$ looks up candidate $\rightarrow$ decodes audio $\rightarrow$ extracts metadata $\rightarrow$ writes file & DB record $\rightarrow$ renders metric summary cards.
-* **View 2 — Submissions Gallery (`🎧 Submissions Gallery`)**:
-  * Displays latest submissions first with Candidate Name, Phone, Submission Timestamp, and metric cards.
-  * Includes an inline Streamlit browser audio player (`st.audio`) for instant playback of stored media.
-
-### 7. How to Launch the Web Application
-To run the Streamlit audio application locally:
-```bash
+# Run Task 3 Streamlit audio collection web app
 streamlit run src/audio/app.py
 ```
-App will open in your browser at `http://localhost:8501`.
 
-### 8. Automated & Manual Verification Results
-* **Automated Tests**: 9 dedicated unit and integration tests in [`tests/test_task3_audio.py`](file:///Z:/ConsultBae_AI_Automation_Assignment/tests/test_task3_audio.py) testing WAV metadata extraction, duration/sample rate/bitrate/loudness accuracy, corrupt file rejection, size limit enforcement, candidate lookup, DB insertion, and compensating disk cleanup on DB failure.
-* **End-to-End Manual Verification**: Verified end-to-end in live Streamlit browser UI (`http://localhost:8501`) with candidate `Varun Jain` (`9000000263`, `person_id = 18`):
-  * **Input & Identity Resolution**: Verified candidate Name and Phone input; successfully resolved existing candidate `person_id = 18`.
-  * **File Upload Test**: Verified uploading external `.wav` and `.mp3` audio files.
-  * **Native Browser Recording Test**: Verified capturing live audio via native browser audio recorder widget (`st.audio_input`).
-  * **Acoustic Property Extraction**: Extracted and verified Duration (2.5s), Sample Rate (44.1 kHz), Bitrate (705.74 kbps), and Loudness (-17.15 dBFS).
-  * **File Storage**: Verified media files saved safely in `data/audio_uploads/audio_18_{timestamp}_{uuid}.wav`.
-  * **Database Persistence**: Verified Supabase PostgreSQL database insertion in `audio_submissions`.
-  * **Gallery & Playback Test**: Verified Submissions Gallery view renders stored candidate submissions with inline browser audio player (`st.audio`) playback, displaying complete metadata and handling multiple submissions per candidate.
+---
+
+## Task 1 — Data Ingestion & Entity Resolution
+
+### Objective
+Combine candidate records from three distinct CSV source files (`source1_naukri_applicants.csv`, `source2_gig_workers.csv`, `source3_cbnexus_contacts.csv`) into a single canonical PostgreSQL database.
+
+### Implementation Summary
+* **Data Cleaning & Normalization**: Standardized mixed date formats, phone numbers (to clean 10-digit strings), email addresses (lowercased), salaries (converted to LPA), gig rates (separated into hourly and monthly fields), and city names.
+* **Structural Recovery**: Detected and fixed a column-shifted row in the gig worker file while preserving original raw line data in staging tables.
+* **Tiered Entity Resolution**: Linked records across systems without a common global ID using a priority hierarchy:
+  1. *Tier 1A*: Direct email match.
+  2. *Tier 1B*: Direct phone match.
+  3. *Tier 2*: Name + City match.
+  4. *Tier 3 Guardrail*: Safety checks to prevent merging different candidates who happen to share the same name.
+* **Results**: Successfully consolidated **103 raw source records into 56 canonical candidate profiles** in PostgreSQL with complete source lineage preserved.
+
+---
+
+## Task 2 — No-Code Skill Tagging Automation (n8n)
+
+### Objective
+Automatically analyze candidate skills stored in PostgreSQL and classify each candidate into standard engineering categories using an AI model within a no-code/low-code workflow.
+
+### Implementation Summary
+* **Platform**: Built using **n8n** connected to Google Gemini LLM and PostgreSQL.
+* **Workflow Logic**: Reads unclassified candidate skills from PostgreSQL, passes them to Gemini via a structured JSON output prompt, extracts the category, confidence rating, and explanation, and writes the results back to the database.
+* **Categories**: Classifies profiles into 7 categories: `backend`, `web-dev`, `full-stack`, `data`, `ai-ml`, `automation-heavy`, or `other`.
+* **Rate Limiting**: Used an n8n loop with a 1-second delay between items to adhere to API rate limits without failing requests.
+* **Results**: Successfully classified all **56 canonical candidates** into table `ai_skill_classifications`. The complete exported workflow is saved at [`n8n/candidate_skill_autotagging_flow.json`](file:///z:/ConsultBae_AI_Automation_Assignment/n8n/candidate_skill_autotagging_flow.json).
+
+---
+
+## Task 3 — Mini Audio Collection Web App
+
+### Objective
+Create a simple web interface allowing gig workers to submit audio recordings, automatically link submissions to existing candidates, extract key audio properties, and display submissions in a playback gallery.
+
+### Implementation Summary
+* **Frontend UI**: Built with **Streamlit** (`src/audio/app.py`) featuring two views:
+  1. *Submit Audio*: Candidate enters name and phone number, then uploads an audio file (`.wav`, `.mp3`, `.m4a`, etc.) or records live audio directly in the browser.
+  2. *Submissions Gallery*: Displays recorded submissions with metadata cards and an inline audio player for instant playback.
+* **Candidate Matching**: Automatically matches candidate phone numbers against the Task 1 canonical database to link the submission to the correct `person_id`.
+* **Metadata Extraction**: Extracted four key audio properties using Python (`pydub`):
+  * **Duration** (seconds)
+  * **Sample Rate** (kHz)
+  * **Bitrate** (kbps)
+  * **Loudness** (dBFS)
+* **Storage & Persistence**: Saved audio files locally in `data/audio_uploads/` for this take-home demo and saved metadata records in PostgreSQL table `audio_submissions`.
+* **Verification**: Verified via 9 unit tests in `tests/test_task3_audio.py` and manually tested end-to-end in the live Streamlit browser UI.
 
 ---
 
@@ -392,8 +282,8 @@ Use compressed audio where appropriate, apply storage lifecycle rules, and monit
 
 ## Submission Checklist
 
-- [x] **GitHub repository** with incremental commit history
-- [x] **README.md** with setup guide + Data Issues Report + Stuck Log + Task 5 Scaling Write-Up
-- [x] **Task 2 n8n workflow JSON** exported into repo ([`n8n/candidate_skill_autotagging_flow.json`](file:///z:/ConsultBae_AI_Automation_Assignment/n8n/candidate_skill_autotagging_flow.json))
-- [ ] **Screen recording** ($\le$ 6 minutes, voice required, face optional)
-- [ ] **Final email reply** containing repository link + video link before deadline
+- [x] **GitHub repository** with clean commit history
+- [x] **README.md** with setup guide, Data Issues Report, Stuck Log, and Task 5 Scaling Write-Up
+- [x] **Task 2 n8n workflow JSON** exported in repository ([`n8n/candidate_skill_autotagging_flow.json`](file:///z:/ConsultBae_AI_Automation_Assignment/n8n/candidate_skill_autotagging_flow.json))
+- [ ] **Screen recording** ($\le$ 6 minutes, voice required)
+- [ ] **Final email submission** with repository link + video link before deadline
