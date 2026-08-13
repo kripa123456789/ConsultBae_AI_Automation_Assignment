@@ -314,130 +314,20 @@ While working with the three source files, I found several problems in the data.
 
 ## Stuck Log
 
-Documentation of the technical challenges encountered during the design and implementation of Task 1, along with the precise resolutions.
+### 1. Matching the Same Person Without a Common ID
 
----
+- **Where I got stuck:** The three files did not have one common ID, so I was not sure how to identify the same person across different files without creating wrong matches.
+- **How I got unstuck:** I asked AI about practical record-matching approaches and compared the options with the actual data. I rejected name-only matching because the same name can belong to different people, and used email and phone first, with name and city only as a weaker match.
 
-### Challenge 1: Entity Resolution without a Common Global ID
-* **Problem**: The three source CSV datasets represent candidates from distinct products (Naukri, Gig Workers, CBNexus) without any shared primary key or global candidate identifier.
-* **What I Tried**:
-  * Evaluated pure exact string matching across all fields simultaneously (failed because S2 lacks phone and S3 lacks email).
-  * Evaluated fuzzy name matching (Levenshtein distance) as a primary join key.
-* **What I Searched / Asked AI**:
-  * Used AI assistance to explore entity-resolution hierarchy patterns for record linkage when primary identifiers are partially disjoint.
-* **What Worked**:
-  * Implemented a **3-Tier Resolution Hierarchy** in `resolver.py`:
-    * *Tier 1A (Email Match)*: Links S1 ↔ S2 with high confidence (`1.0`).
-    * *Tier 1B (Phone Match)*: Links S1 ↔ S3 with high confidence (`1.0`).
-    * *Tier 2 (Name + City Match)*: Links S2 ↔ S3 with medium confidence (`0.85`).
-    * *Tier 3 (Conflict Guardrail)*: Rejects merges if email/phone attributes explicitly contradict each other.
-* **What I Rejected & Why**:
-  * Rejected Name-Only matching because common Indian names (e.g. `Deepak Nair`, `Arjun Mehta`) collide across different locations and email domains, creating false-positive entity merges.
-* **Final Result**: Successfully consolidated 103 raw records across 3 datasets into **56 canonical person entities** with 0 false-positive merges.
+### 2. Finding and Recovering the Broken Row
 
----
+- **Where I got stuck:** One row in the gig-worker file had its values in the wrong columns, so the data could not be read normally.
+- **How I got unstuck:** I asked AI about ways to detect a shifted CSV row without depending on fixed skill names. I rejected hardcoded keyword checks and used the expected format of each field to detect the shift, then moved the values back to the correct columns while keeping the original row.
 
-### Challenge 2: Malformed Source 2 Column-Shift Detection
-* **Problem**: Line 20 of `source2_gig_workers.csv` is malformed, shifting all fields 1 column position to the right (putting skills into the email field).
-* **What I Tried**:
-  * Initially considered string keyword searching (e.g. checking if `"react"` or `"python"` is in the email string).
-* **What I Searched / Asked AI**:
-  * Used AI assistance to explore structural CSV validation techniques for detecting column-shifted rows without domain-specific vocabulary dependencies.
-* **What Worked**:
-  * Replaced vocabulary matching with **structural field validation**:
-    * Check if `Field 0` fails email regex (`normalize_email(r[0]) == ""`).
-    * Check if `Field 1` passes email regex (`normalize_email(r[1]) != ""`).
-    * If `Field 0` is invalid as an email AND `Field 1` is valid as an email, a structural column shift is detected.
-    * Un-shifted fields in memory (`r[0]` $\rightarrow$ skills, `r[1]` $\rightarrow$ email, `r[2]` $\rightarrow$ name, `r[3]` $\rightarrow$ rate, `r[4]` $\rightarrow$ location, `r[5]` $\rightarrow$ status).
-    * Saved verbatim raw line string in `raw_line_content`, flagged `was_malformed = TRUE` in `raw_source2_gig_workers`, and logged to `ingestion_quarantine_log`.
-* **What I Rejected & Why**:
-  * Rejected hardcoded skill string matching (`"react" in email`) because it is brittle and would fail if a column-shifted row contained different skill tags (e.g. `'docker, sql'`).
-* **Final Result**: Detected, quarantined, un-shifted, and ingested Line 20 cleanly into canonical database tables while preserving complete raw line lineage.
+### 3. Handling the Gemini Rate Limit in n8n
 
----
-
-### Challenge 3: PostgreSQL Migration & Multi-Run Pipeline Idempotency
-* **Problem**: The prototype pipeline duplicated records (`persons` count doubled from 56 to 112) when executed repeatedly without table reset because SQL INSERT statements lacked uniqueness constraints and conflict resolution.
-* **What I Tried**:
-  * Considered clearing tables automatically on every run, but this violates non-destructive production data pipelines.
-* **What I Searched / Asked AI**:
-  * Used AI assistance to evaluate idempotent SQL upsert patterns (`INSERT ... ON CONFLICT DO UPDATE / DO NOTHING`) for PostgreSQL schema constraints.
-* **What Worked**:
-  * Added composite `UNIQUE` constraints to schema DDL (`database/schema.sql`):
-    * `UNIQUE (source_system, source_file, line_number)` on raw staging tables.
-    * `UNIQUE (source_system, source_file, source_line_number)` on `person_source_mappings`.
-    * `UNIQUE (person_id, email_address)` on `person_emails`.
-    * `UNIQUE (person_id, phone_number)` on `person_phones`.
-  * Updated ingestion queries to use `ON CONFLICT (source_system, source_file, line_number) DO UPDATE SET ...` and `resolver.py` to use `ON CONFLICT DO NOTHING`.
-  * Added an idempotency guardrail check in `src/app/main.py`.
-* **What I Rejected & Why**:
-  * Rejected relying solely on table truncation (`DROP TABLE`), as real production ETL pipelines must safely re-run over existing databases idempotently.
-* **Final Result**: Verified multi-run idempotency across 3 consecutive executions against live PostgreSQL (Supabase); database table counts remained 100% stable (Run 1 == Run 2 == Run 3: 56 persons, 103 mappings).
-
----
-
-### Challenge 4: n8n Postgres Write Node Override (`classification_id = 0`)
-* **Problem**: During the initial single-candidate Task 2 test run in n8n, candidate `person_id = 1` was inserted into Supabase PostgreSQL with `classification_id = 0` instead of starting from `1` via PostgreSQL's `SERIAL` sequence.
-* **What I Tried**:
-  * Inspected `database/schema.sql` and PostgreSQL catalog via `information_schema.columns` / `sequences` to check if `classification_id` was missing default sequence expressions. Confirmed `classification_id` was correctly defined as `SERIAL PRIMARY KEY`.
-* **What I Searched / Asked AI**:
-  * Investigated n8n Postgres node payload field mapping behavior when auto-mapping table schemas.
-* **What Worked**:
-  * Identified that n8n's Edit Fields / Postgres node automatically included `classification_id: 0` in the write payload, overriding PostgreSQL's `DEFAULT nextval(...)` sequence.
-  * Removed `classification_id` from n8n's Edit Fields output and Postgres node mapping configuration, leaving `person_id` as the match key and passing only data attributes (`category`, `confidence`, `reason`, `model`).
-  * Corrected candidate `person_id = 1`'s record in Supabase to `classification_id = 1` and synchronized sequence `ai_skill_classifications_classification_id_seq` via `setval(...)`.
-* **What I Rejected & Why**:
-  * Rejected re-executing DDL schema scripts because catalog inspection proved the schema sequence was already intact.
-* **Final Result**: Omitting `classification_id` from write payloads allowed PostgreSQL to manage sequences natively, ensuring reliable sequential IDs across all 56 records (`1..56`).
-
----
-
-### Challenge 5: Google Gemini API Rate-Limiting (HTTP 429)
-* **Problem**: Sending all unclassified candidate skills through the Gemini Chat Model node in batch mode triggered HTTP 429 / Rate Limit Exceeded errors from Google Gemini's free-tier endpoint.
-* **What I Tried**:
-  * Executed the workflow without concurrency throttling; received API rate limit rejections after the first few candidate items.
-* **What I Searched / Asked AI**:
-  * Evaluated n8n flow-control constructs for rate-limiting LangChain LLM nodes.
-* **What Worked**:
-  * Redesigned the workflow by introducing a **Loop Over Items** (`splitInBatches` node with batch size = 1) combined with a **Wait** node (1-second delay between loop iterations).
-  * Candidate records are fetched from SQL, iterated serially item-by-item, passed to Gemini, written back to PostgreSQL, and paused briefly before iterating to the next candidate.
-* **What I Rejected & Why**:
-  * Rejected single-prompt mega-batching (combining all 56 candidates into one prompt) because it reduces classification precision, risks context truncation, and fails structured output validation per candidate.
-* **Final Result**: All 56 candidates were processed sequentially with 0 rate-limit rejections and written to Supabase `ai_skill_classifications`.
-
----
-
-### Challenge 6: Manual Verification vs. Trusting Workflow Automation
-* **Problem**: No-code workflow tools (like n8n) can visually display a green "Success" execution badge even if individual data fields inside the write payload contain logical errors (e.g., `classification_id = 0` or missing timestamps).
-* **What I Tried**:
-  * Inspected n8n execution log UI, which showed successful node completions.
-* **What I Searched / Asked AI**:
-  * Formulated SQL validation queries to audit downstream PostgreSQL table state directly via `psycopg2`.
-* **What Worked**:
-  * Created an independent Python/SQL database verification suite (`verify_phase2.py`) querying Supabase directly after workflow completion to validate row counts, unique constraints, distinct categories, null field checks, and primary key sequence ranges.
-* **What I Rejected & Why**:
-  * Rejected relying solely on UI completion badges because UI indicators confirm execution status, not data payload correctness.
-* **Final Result**: Independent database inspection provided empirical proof of correctness and caught the `classification_id = 0` issue before full-batch execution.
-
----
-
-### Challenge 7: Audio Decibel Extraction (`dBFS`) for Silent / Low-Volume Clips
-* **Problem**: When processing silent or low-amplitude audio files with `pydub`, `audio_segment.dBFS` evaluates to `-inf` (negative infinity), causing PostgreSQL schema floating-point insert errors or invalid JSON values in web views.
-* **What I Tried**: Tested metadata extraction on silent WAV buffers; confirmed `-inf` values caused database insertion failures.
-* **What I Searched / Asked AI**: Evaluated AudioSegment decibel normalization handling for zero-amplitude digital signals.
-* **What Worked**: Implemented an explicit decibel floor check in `src/audio/extractor.py`: if `math.isinf(loudness_db)` or `math.isnan(loudness_db)`, default `loudness_db = -99.0`. An application-level -99 dBFS floor is used to keep non-finite loudness values out of the database and UI.
-* **What I Rejected & Why**: Rejected storing `NaN` or `-inf` directly into relational numeric columns because standard PostgreSQL numeric types and JSON serializers reject non-finite floating-point representations.
-* **Final Result**: Guarantees safe numeric range values for PostgreSQL schema validation and Streamlit frontend UI components.
-
----
-
-### Challenge 8: Compensating Disk Cleanup on Database Insert Failure
-* **Problem**: If a user uploads a valid audio file that passes metadata extraction, the application writes the file to disk (`data/audio_uploads/`) *before* executing the PostgreSQL `INSERT` transaction. If the database transaction fails, the audio file remains on disk as an orphaned file.
-* **What I Tried**: Considered writing to the database first before saving the file to disk, but generating a safe file path after DB insertion leads to secondary update queries.
-* **What I Searched / Asked AI**: Evaluated cleanup guardrails for disk file operations accompanying relational database transactions.
-* **What Worked**: Wrapped the database insertion in a `try...except` block in `src/audio/extractor.py`. If `conn.execute()` or `conn.commit()` raises an exception, the handler issues `conn.rollback()` and deletes the newly created audio file from disk (`os.remove(file_path)`). This provides compensating cleanup so failed database writes do not normally leave orphaned audio files.
-* **What I Rejected & Why**: Rejected leaving orphaned disk files when database writes fail because it causes disk leakage and broken data lineage.
-* **Final Result**: Reduces filesystem pollution by removing unreferenced temporary audio uploads when database operations fail. Automated test `test_process_and_store_submission_db_failure_cleanup` in `tests/test_task3_audio.py` simulates database failure and verifies temporary file cleanup.
+- **Where I got stuck:** When I tried to process many candidates through Gemini, the workflow started returning rate-limit errors.
+- **How I got unstuck:** I checked n8n's flow-control options and asked AI for ways to handle rate limits without using custom code. I rejected sending all candidates in one large request and used one-candidate-at-a-time processing with a short wait between requests.
 
 ---
 
