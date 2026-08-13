@@ -89,6 +89,8 @@ Combine candidate records from three distinct CSV source files (`source1_naukri_
 ### Objective
 Automatically analyze candidate skills stored in PostgreSQL and classify each candidate into standard engineering categories using an AI model within a no-code/low-code workflow.
 
+![n8n](n8n_workflow_ss.png)
+
 ### Implementation Summary
 * **Platform**: Built using **n8n** connected to Google Gemini LLM and PostgreSQL.
 * **Workflow Logic**: Reads unclassified candidate skills from PostgreSQL, passes them to Gemini via a structured JSON output prompt, extracts the category, confidence rating, and explanation, and writes the results back to the database.
