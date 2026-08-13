@@ -165,3 +165,90 @@ This document serves as the running, continuous engineering journal for the Cons
 
 * **How I verified it**:
   * Executed corrected query against Supabase PostgreSQL: confirmed that candidates appearing across all 3 source systems (e.g. `Varun Jain`, `person_id = 18`) map back to exactly 3 distinct lineage records in `person_source_mappings`. Demonstrated the critical importance of independent manual verification over trusting unverified automated assumptions.
+
+---
+
+### 6. n8n Postgres Write Node Override (`classification_id = 0`)
+
+* **Problem**:
+  During the initial single-candidate Task 2 test run in n8n, the classification row for candidate `person_id = 1` was inserted into Supabase PostgreSQL with `classification_id = 0` instead of starting from `1` via PostgreSQL's `SERIAL` auto-increment sequence.
+
+* **What I initially considered**:
+  * Suspecting that the database schema was missing a `SERIAL` sequence default on `classification_id`.
+
+* **What I tried**:
+  * Inspected `database/schema.sql` and queried PostgreSQL catalog table definitions using `information_schema.columns` and `information_schema.sequences`. Confirmed that `classification_id` was already defined as `SERIAL PRIMARY KEY` with default `nextval('ai_skill_classifications_classification_id_seq'::regclass)`.
+
+* **What failed / was rejected**:
+  * **Rejected Re-creating Database Schema**: Re-executing DDL schema scripts was rejected because catalog inspection proved the sequence was intact.
+
+* **What I searched or asked AI**:
+  * Investigated n8n Postgres node column mapping behavior when auto-mapping schema fields.
+
+* **Final solution**:
+  * Identified that n8n's Edit Fields / Postgres node automatically included `classification_id: 0` in the SQL `INSERT/UPSERT` payload, overriding PostgreSQL's native `DEFAULT nextval(...)` sequence expression.
+  * Explicitly removed `classification_id` from n8n's Edit Fields output and Postgres node mapping configuration, leaving `person_id` as the match key and passing only data attributes (`category`, `confidence`, `reason`, `model`).
+  * Updated candidate `person_id = 1`'s record in Supabase to `classification_id = 1` and synchronized sequence `ai_skill_classifications_classification_id_seq` via `setval(...)`.
+
+* **Why I chose it**:
+  * Omitting auto-increment primary keys from write payloads lets PostgreSQL manage sequences natively, ensuring reliable sequential IDs across all 56 records without primary key collisions.
+
+* **How I verified it**:
+  * Executed upsert queries for Candidate #1 and Candidate #2 without passing `classification_id`. Verified that Candidate #2 automatically received `classification_id = 2`, and subsequent full-batch processing populated all 56 records with clean sequential IDs (`1..56`).
+
+---
+
+### 7. Google Gemini API Rate-Limiting (HTTP 429)
+
+* **Problem**:
+  When attempting to send all unclassified candidate skills through the Gemini Chat Model node in batch mode, the workflow failed with HTTP 429 / Rate Limit Exceeded errors from Google Gemini's free-tier endpoint.
+
+* **What I initially considered**:
+  * Sending the entire candidate list in a single large prompt, or increasing execution concurrency.
+
+* **What I tried**:
+  * Executed the workflow without concurrency throttling; received API rate limit rejections after the first few candidate items.
+
+* **What failed / was rejected**:
+  * **Rejected Single-Prompt Mega Batching**: Sending all candidate skills in a single prompt was rejected because combining 56 candidates reduces classification accuracy, risks context truncation, and fails structured output validation per candidate.
+
+* **What I searched or asked AI**:
+  * Evaluated n8n flow-control constructs for rate-limiting LangChain LLM nodes.
+
+* **Final solution**:
+  * Redesigned the workflow by introducing a **Loop Over Items** (`splitInBatches` node with batch size = 1) combined with a **Wait** node (1-second delay between loop iterations).
+  * Candidate records are fetched from SQL, iterated serially item-by-item, passed to the Gemini chain, written back to PostgreSQL, and paused briefly before iterating to the next candidate.
+
+* **Why I chose it**:
+  * Preserves full no-code architecture while enforcing controlled request rates, adhering strictly to Gemini API rate limits.
+
+* **How I verified it**:
+  * Ran the full 56-candidate workflow in local n8n. All 56 candidates were processed sequentially with 0 rate-limit rejections and written to Supabase `ai_skill_classifications`.
+
+---
+
+### 8. Manual Verification vs. Trusting Workflow Automation
+
+* **Problem**:
+  No-code workflow tools (like n8n) can visually display a green "Success" execution badge even if individual data fields inside the write payload contain logical errors (e.g., `classification_id = 0` or missing timestamps).
+
+* **What I initially considered**:
+  * Relying solely on n8n's visual node completion indicators to declare Task 2 completed.
+
+* **What I tried**:
+  * Checked n8n execution log UI, which showed successful node completions.
+
+* **What failed / was rejected**:
+  * **Rejected Relying Only on Node Status**: Assuming database correctness based on UI success badges was rejected because UI indicators confirm execution completion, not data accuracy.
+
+* **What I searched or asked AI**:
+  * Formulated SQL validation suites to audit downstream PostgreSQL table state directly via `psycopg2`.
+
+* **Final solution**:
+  * Created an independent Python/SQL database verification suite (`verify_phase2.py`) querying Supabase directly after workflow completion to validate row counts, unique constraints, distinct categories, null field checks, and primary key sequence ranges.
+
+* **Why I chose it**:
+  * Independent database inspection provides empirical proof of correctness and caught the `classification_id = 0` issue before full-batch execution.
+
+* **How I verified it**:
+  * Ran SQL verification queries confirming 56 total rows, 0 duplicate candidate IDs, 0 null essential fields, 100% valid categories, and sequence alignment (`min=1`, `max=56`).

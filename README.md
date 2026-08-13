@@ -11,7 +11,7 @@ An AI automation repository merging candidate data across disparate systems, res
 | Task | Title | Core / Optional | Status | Key Deliverables / Artifacts |
 | :-: | :--- | :-: | :-: | :--- |
 | **Task 1** | **Merge** | **Core** | **COMPLETED** | PostgreSQL schema ([database/schema.sql](file:///Z:/ConsultBae_AI_Automation_Assignment/database/schema.sql)), Ingestion & Normalization pipeline ([src/ingestion/](file:///Z:/ConsultBae_AI_Automation_Assignment/src/ingestion/)), 3-Tier Entity Resolution engine ([src/matching/](file:///Z:/ConsultBae_AI_Automation_Assignment/src/matching/)), automated test suite ([tests/test_task1.py](file:///Z:/ConsultBae_AI_Automation_Assignment/tests/test_task1.py)). |
-| **Task 2** | **Automate with a no-code/low-code tool** | **Core** | **NOT STARTED** | Reserved for n8n workflow JSON export in [n8n/](file:///Z:/ConsultBae_AI_Automation_Assignment/n8n/). |
+| **Task 2** | **Automate with a no-code/low-code tool** | **Core** | **COMPLETED** | n8n workflow JSON export in [n8n/candidate_skill_autotagging_flow.json](file:///Z:/ConsultBae_AI_Automation_Assignment/n8n/candidate_skill_autotagging_flow.json) & auto-classified PostgreSQL database results (`ai_skill_classifications`). |
 | **Task 3** | **Mini audio collection app** | **Core** | **NOT STARTED** | Reserved for web audio recorder/uploader app & metadata extractor. |
 | **Task 4** | **Data issues report** | **Core** | **COMPLETED** | Complete report embedded in [README.md](#data-issues-report) below. |
 | **Task 5** | **Stretch** | **Optional** | **NOT STARTED** | 1-page no-code architectural write-up for 5,000 gig worker scale. |
@@ -67,6 +67,90 @@ To verify pipeline normalization, anomaly recovery, entity resolution, and idemp
 python -m pytest tests/test_task1.py
 ```
 *(All 15 unit and end-to-end integration tests pass cleanly).*
+
+---
+
+## Task 2 — Automate with a No-Code/Low-Code Tool
+
+### 1. Objective
+Automate downstream candidate processing by integrating PostgreSQL canonical candidate data with an AI model via a no-code/low-code workflow engine. Unclassified candidates and their aggregated skills are evaluated by an LLM to automatically categorize candidate profiles into standardized engineering categories and write results back to PostgreSQL.
+
+### 2. Why n8n Was Chosen
+n8n was selected as the automation platform because it is open-source, self-hostable, natively supports complex database nodes (PostgreSQL with parameter mapping & upsert logic), features native LangChain nodes (LLM chains, Gemini chat models, structured JSON output parsers), and supports flow control constructs (`Loop Over Items` and `Wait` nodes) required for API rate-limit management.
+
+### 3. High-Level Workflow Architecture
+```
+[Schedule Trigger]
+       ↓
+[Postgres: Execute Query]  ── Fetches unclassified candidates & aggregated skills
+       ↓
+[Loop Over Items]          ── Processes candidates item-by-item (batch size = 1)
+       ↓
+[Basic LLM Chain]          ── Sends candidate skills prompt to Gemini Chat Model
+   ├── Google Gemini Chat Model
+   └── Structured Output Parser
+       ↓
+[Edit Fields]              ── Formats person_id, category, confidence, reason, model
+       ↓
+[Postgres: Insert or Update] ── Upserts into ai_skill_classifications (match key: person_id)
+       ↓
+[Wait]                     ── 1-second rate-limiting delay per candidate
+       ↓
+(Loops back to Loop Over Items until all items processed)
+```
+
+### 4. Node-by-Node Explanation
+1. **Schedule Trigger**: Triggers execution automatically (or manually on demand).
+2. **Execute a SQL Query (Postgres Node)**: Aggregates skills per canonical candidate using `STRING_AGG(DISTINCT cs.skill_name, ', ')` where `ai_skill_classifications.person_id IS NULL`.
+3. **Loop Over Items (SplitInBatches Node)**: Iterates over candidate records one at a time to prevent API rate spikes.
+4. **Basic LLM Chain (LangChain Node)**: Constructs prompt passing candidate name and skill list.
+5. **Google Gemini Chat Model (LM Node)**: Connects to `models/gemini-3.5-flash-lite` (or equivalent Gemini model) via Google PaLM API.
+6. **Structured Output Parser (LangChain Node)**: Enforces JSON schema response format matching `{category, confidence, reason}`.
+7. **Edit Fields (Set Node)**: Maps original candidate `person_id` from the SQL query node together with LLM output attributes (`category`, `confidence`, `reason`) and sets `model = 'Gemini'`.
+8. **Insert or Update Rows in a Table (Postgres Node)**: Executes an upsert into table `ai_skill_classifications` matching on `person_id`. `classification_id` is excluded from the node mapping so PostgreSQL's native `SERIAL` sequence automatically generates sequential primary keys (`1..56`).
+9. **Wait Node**: Introduces a controlled delay between item iterations to adhere to Google Gemini API free-tier RPM rate limits.
+
+### 5. Gemini Classification Categories
+Candidates are classified into exactly one of seven permitted categories:
+* `automation-heavy`
+* `web-dev`
+* `data`
+* `backend`
+* `ai-ml`
+* `full-stack`
+* `other`
+
+### 6. Structured Output & Explainability Note
+The structured JSON output extracted from Gemini includes:
+* `category`: Exact string matching one of the 7 allowed categories.
+* `confidence`: Model-reported confidence score between 0.0 and 1.0. *(Note: Confidence and reason fields were intentionally added as engineering enhancements for model explainability and auditability; they were not explicitly required by the assignment rulebook. Confidence represents a model-reported rating, not a statistically calibrated probability).*
+* `reason`: Concise natural language explanation of why the category was assigned based on candidate skills.
+
+### 7. PostgreSQL Write-Back & Upsert Behavior
+Results are written back into table `ai_skill_classifications`. The Postgres node is configured with **Insert or Update** mode on matching column `person_id`. This ensures idempotency: re-running the workflow updates existing classifications without duplicating rows. `classification_id` is auto-generated by PostgreSQL's `SERIAL` sequence, and timestamps (`created_at`, `updated_at`) are automatically set by PostgreSQL default expressions.
+
+### 8. Rate-Limit Handling
+Initial batch execution triggered HTTP 429 / Rate Limit errors from the Gemini API when processing many candidates simultaneously. To resolve this, the workflow was structured using `Loop Over Items` paired with a `Wait` node. This guarantees serial, single-candidate requests spaced apart, ensuring 100% completion without API throttling failures.
+
+### 9. Verification & Execution Results
+* **Total Candidates Classified**: All **56 canonical person profiles** successfully processed.
+* **Database State**: `SELECT COUNT(*) FROM ai_skill_classifications;` = `56`.
+* **Integrity**: `0` duplicate `person_id` records, `0` null values in essential fields (`person_id`, `category`, `model`), `56` distinct auto-incremented `classification_id` values (`1..56`).
+
+### 10. Workflow Export Location
+The complete n8n workflow export is committed in the repository at:
+[n8n/candidate_skill_autotagging_flow.json](file:///z:/ConsultBae_AI_Automation_Assignment/n8n/candidate_skill_autotagging_flow.json)
+
+### 11. Import & Setup Instructions
+1. Open local or hosted n8n instance (`http://localhost:5678`).
+2. Select **Workflows** $\rightarrow$ **Import from File** and select `n8n/candidate_skill_autotagging_flow.json`.
+3. Configure credentials:
+   * **Postgres Account**: Set host, port, database name, user, password, and SSL (`require`).
+   * **Google Gemini API Account**: Set Google Gemini API key.
+4. Execute workflow.
+
+> [!IMPORTANT]
+> **Credential Security**: All credential identifiers in `candidate_skill_autotagging_flow.json` are sanitized local references. Real database credentials and Gemini API keys must be configured inside your local n8n instance and are never committed to Git.
 
 ---
 
@@ -248,7 +332,7 @@ Documentation of the technical challenges encountered during the design and impl
 
 - [x] **GitHub repository** with incremental commit history
 - [x] **README.md** with setup guide + Data Issues Report + Stuck Log
-- [ ] **Task 2 n8n flow JSON** exported into repo
+- [x] **Task 2 n8n flow JSON** exported into repo (`n8n/candidate_skill_autotagging_flow.json`)
 - [ ] **Task 3 Mini audio collection app** working end-to-end
 - [ ] **Screen recording** ($\le$ 6 minutes, voice required, face optional)
 - [ ] **Final email reply** containing repository link + video link before deadline

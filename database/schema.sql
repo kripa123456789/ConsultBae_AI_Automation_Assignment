@@ -147,3 +147,17 @@ CREATE INDEX IF NOT EXISTS idx_persons_name_city ON persons(LOWER(canonical_name
 CREATE INDEX IF NOT EXISTS idx_person_emails_addr ON person_emails(LOWER(email_address));
 CREATE INDEX IF NOT EXISTS idx_person_phones_num ON person_phones(phone_number);
 CREATE INDEX IF NOT EXISTS idx_mappings_person ON person_source_mappings(person_id);
+
+-- 4. TASK 2 AI CLASSIFICATION LAYER
+CREATE TABLE IF NOT EXISTS ai_skill_classifications (
+    classification_id SERIAL PRIMARY KEY,
+    person_id INT UNIQUE NOT NULL REFERENCES persons(person_id) ON DELETE CASCADE,
+    category VARCHAR(100) NOT NULL,
+    confidence DOUBLE PRECISION,
+    reason TEXT,
+    model VARCHAR(100),
+    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_ai_classifications_person ON ai_skill_classifications(person_id);

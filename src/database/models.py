@@ -20,7 +20,7 @@ def drop_all_tables(db_path=None):
     """Drops all tables for clean reset capability."""
     conn = get_connection(db_path)
     tables = [
-        "entity_conflicts", "candidate_skills", "person_phones", "person_emails",
+        "ai_skill_classifications", "entity_conflicts", "candidate_skills", "person_phones", "person_emails",
         "candidate_profiles", "person_source_mappings", "persons",
         "ingestion_quarantine_log", "raw_source3_cbnexus",
         "raw_source2_gig_workers", "raw_source1_naukri"
