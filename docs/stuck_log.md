@@ -252,3 +252,59 @@ This document serves as the running, continuous engineering journal for the Cons
 
 * **How I verified it**:
   * Ran SQL verification queries confirming 56 total rows, 0 duplicate candidate IDs, 0 null essential fields, 100% valid categories, and sequence alignment (`min=1`, `max=56`).
+
+---
+
+### 9. Audio Decibel Extraction (`dBFS`) for Silent / Low-Volume Clips
+
+* **Problem**:
+  When processing silent or extremely low-amplitude audio files with `pydub`, `audio_segment.dBFS` evaluates to `-inf` (negative infinity), which causes PostgreSQL floating-point schema insertion errors or invalid JSON values in web views.
+
+* **What I initially considered**:
+  * Leaving loudness values unhandled or letting `math.isinf()` throw an unhandled exception.
+
+* **What I tried**:
+  * Tested metadata extraction on silent WAV buffers; confirmed `-inf` values caused database constraint issues.
+
+* **What failed / was rejected**:
+  * **Rejected Storing NaN / Inf**: Inserting `NaN` or `-inf` directly into relational numeric columns was rejected because standard PostgreSQL numeric types and JSON serializers reject non-finite floating-point representations.
+
+* **What I searched or asked AI**:
+  * Evaluated AudioSegment decibel normalization handling for zero-amplitude digital signals.
+
+* **Final solution**:
+  * Implemented an explicit decibel floor check in `src/audio/extractor.py`: if `math.isinf(loudness_db)` or `math.isnan(loudness_db)`, default `loudness_db = -99.0`. An application-level -99 dBFS floor is used to keep non-finite loudness values out of the database and UI.
+
+* **Why I chose it**:
+  * Guarantees safe numeric range values for PostgreSQL schema validation and Streamlit frontend UI components.
+
+* **How I verified it**:
+  * Executed unit tests in `tests/test_task3_audio.py` against synthetic wave buffers and verified clean float representation (-17.15 dBFS) without overflow errors.
+
+---
+
+### 10. Compensating Disk Cleanup on Database Insert Failure
+
+* **Problem**:
+  If a user uploads a valid audio file that passes metadata extraction, the application writes the file to disk (`data/audio_uploads/`) *before* executing the PostgreSQL `INSERT` transaction. If the database transaction fails (e.g. database network disruption or foreign key constraint error), the audio file remains on disk as an orphaned file.
+
+* **What I initially considered**:
+  * Writing to the database first before saving the file to disk.
+
+* **What I tried**:
+  * Writing to the database first required knowing the final file path in advance, but generating a safe file path after DB insertion leads to secondary update queries.
+
+* **What failed / was rejected**:
+  * **Rejected Leaving Orphaned Disk Files**: Allowing files to remain on disk when database writes fail causes disk leakage and broken data lineage.
+
+* **What I searched or asked AI**:
+  * Evaluated cleanup guardrails for disk file operations accompanying relational database transactions.
+
+* **Final solution**:
+  * Wrapped the database insertion in a `try...except` block in `src/audio/extractor.py`. If `conn.execute()` or `conn.commit()` raises an exception, the handler issues `conn.rollback()` and deletes the newly created audio file from disk (`os.remove(file_path)`). This provides compensating cleanup so failed database writes do not normally leave orphaned audio files.
+
+* **Why I chose it**:
+  * Reduces filesystem pollution by removing unreferenced temporary audio uploads when database operations fail.
+
+* **How I verified it**:
+  * Executed unit test `test_process_and_store_submission_db_failure_cleanup` in `tests/test_task3_audio.py`, simulating a database foreign-key violation and verifying that temporary audio files are cleanly deleted from `data/audio_uploads/`.

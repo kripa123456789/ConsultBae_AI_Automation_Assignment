@@ -12,7 +12,7 @@ An AI automation repository merging candidate data across disparate systems, res
 | :-: | :--- | :-: | :-: | :--- |
 | **Task 1** | **Merge** | **Core** | **COMPLETED** | PostgreSQL schema ([database/schema.sql](file:///Z:/ConsultBae_AI_Automation_Assignment/database/schema.sql)), Ingestion & Normalization pipeline ([src/ingestion/](file:///Z:/ConsultBae_AI_Automation_Assignment/src/ingestion/)), 3-Tier Entity Resolution engine ([src/matching/](file:///Z:/ConsultBae_AI_Automation_Assignment/src/matching/)), automated test suite ([tests/test_task1.py](file:///Z:/ConsultBae_AI_Automation_Assignment/tests/test_task1.py)). |
 | **Task 2** | **Automate with a no-code/low-code tool** | **Core** | **COMPLETED** | n8n workflow JSON export in [n8n/candidate_skill_autotagging_flow.json](file:///Z:/ConsultBae_AI_Automation_Assignment/n8n/candidate_skill_autotagging_flow.json) & auto-classified PostgreSQL database results (`ai_skill_classifications`). |
-| **Task 3** | **Mini audio collection app** | **Core** | **NOT STARTED** | Reserved for web audio recorder/uploader app & metadata extractor. |
+| **Task 3** | **Mini audio collection app** | **Core** | **COMPLETED** | Streamlit web app ([src/audio/app.py](file:///Z:/ConsultBae_AI_Automation_Assignment/src/audio/app.py)), metadata extractor ([src/audio/extractor.py](file:///Z:/ConsultBae_AI_Automation_Assignment/src/audio/extractor.py)), PostgreSQL table (`audio_submissions`), and test suite ([tests/test_task3_audio.py](file:///Z:/ConsultBae_AI_Automation_Assignment/tests/test_task3_audio.py)). |
 | **Task 4** | **Data issues report** | **Core** | **COMPLETED** | Complete report embedded in [README.md](#data-issues-report) below. |
 | **Task 5** | **Stretch** | **Optional** | **NOT STARTED** | 1-page no-code architectural write-up for 5,000 gig worker scale. |
 
@@ -151,6 +151,80 @@ The complete n8n workflow export is committed in the repository at:
 
 > [!IMPORTANT]
 > **Credential Security**: All credential identifiers in `candidate_skill_autotagging_flow.json` are sanitized local references. Real database credentials and Gemini API keys must be configured inside your local n8n instance and are never committed to Git.
+
+---
+
+## Task 3 — Mini Audio Collection App
+
+### 1. Objective
+Build a web application enabling gig workers to submit audio recordings (via file upload or browser recording), link submissions directly to the canonical candidate database from Task 1 via phone identity lookup, automatically analyze and store acoustic metadata properties (duration, sample rate, bitrate, loudness), and provide a gallery view with inline browser audio playback.
+
+### 2. Architecture & Technology Stack
+* **UI Framework**: **Streamlit** ([`src/audio/app.py`](file:///Z:/ConsultBae_AI_Automation_Assignment/src/audio/app.py)) providing dual-tab form and gallery views.
+* **Audio Extraction Engine**: **`pydub`** ([`src/audio/extractor.py`](file:///Z:/ConsultBae_AI_Automation_Assignment/src/audio/extractor.py)) analyzing uncompressed and compressed audio streams (`.wav`, `.mp3`, `.m4a`, `.ogg`, `.webm`, `.flac`, `.aac`).
+* **Database & Identity Linkage**: PostgreSQL table `audio_submissions` linked to canonical candidate table `persons` via FOREIGN KEY (`person_id`).
+* **File Storage**: Local filesystem storage in `data/audio_uploads/` with UUID timestamped filenames (`audio_{person_id}_{YYYYMMDDTHHMMSS}_{uuid[:8]}.ext`). `data/audio_uploads/` is tracked in `.gitignore` to prevent committing user audio files.
+
+### 3. Database Schema (`audio_submissions`)
+Defined in [`database/schema.sql`](file:///Z:/ConsultBae_AI_Automation_Assignment/database/schema.sql#L164-L177):
+```sql
+CREATE TABLE IF NOT EXISTS audio_submissions (
+    submission_id SERIAL PRIMARY KEY,
+    person_id INT NOT NULL REFERENCES persons(person_id) ON DELETE CASCADE,
+    original_filename VARCHAR(255) NOT NULL,
+    file_path TEXT NOT NULL,
+    file_size_bytes BIGINT NOT NULL,
+    duration_seconds DOUBLE PRECISION NOT NULL,
+    sample_rate_khz DOUBLE PRECISION NOT NULL,
+    bitrate_kbps DOUBLE PRECISION NOT NULL,
+    loudness_db DOUBLE PRECISION NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_audio_submissions_person ON audio_submissions(person_id);
+```
+
+### 4. Canonical Identity Resolution & Validation Rules
+1. **Normalization & Identity Lookup**: Candidate name is normalized and checked that it is non-empty; candidate phone is normalized using `normalize_phone()` (extracting clean 10-digit string). Existing candidates are resolved primarily by normalized phone number.
+2. **Identity Lookup**: Searches `person_phones` and `persons` tables for existing canonical candidate matching the normalized phone number.
+3. **Guardrails**:
+   * If **0 candidates match**: Shows validation error `"Candidate not found for phone number 'X'. Please verify the phone number."`
+   * If **>1 candidates match**: Shows ambiguity error preventing corrupted identity merges.
+   * If **1 candidate matches**: Obtains `person_id` and links submission.
+4. **Compensating Disk Cleanup**: If database insertion fails after saving the file to disk, the application provides compensating cleanup by deleting the newly created audio file from `data/audio_uploads/` so failed database writes do not normally leave orphaned audio files.
+
+### 5. Automated Audio Metadata Extraction
+For every submission, `extract_audio_metadata()` decodes the audio stream and computes:
+* **Duration (seconds)**: `round(len(audio_segment) / 1000.0, 3)`
+* **Sample Rate (kHz)**: `round(audio_segment.frame_rate / 1000.0, 2)`
+* **Bitrate (kbps)**: `round((file_size_bytes * 8.0) / duration_seconds / 1000.0, 2)`
+* **Loudness (dBFS)**: `round(audio_segment.dBFS, 2)`. An application-level -99 dBFS floor is used to keep non-finite loudness values out of the database and UI.
+
+### 6. Application Views
+* **View 1 — Submit Audio (`📤 Submit Audio`)**:
+  * Fields: Candidate Name, Phone Number, Audio File Upload / Browser Recording.
+  * Workflow: Validates fields $\rightarrow$ normalizes phone $\rightarrow$ looks up candidate $\rightarrow$ decodes audio $\rightarrow$ extracts metadata $\rightarrow$ writes file & DB record $\rightarrow$ renders metric summary cards.
+* **View 2 — Submissions Gallery (`🎧 Submissions Gallery`)**:
+  * Displays latest submissions first with Candidate Name, Phone, Submission Timestamp, and metric cards.
+  * Includes an inline Streamlit browser audio player (`st.audio`) for instant playback of stored media.
+
+### 7. How to Launch the Web Application
+To run the Streamlit audio application locally:
+```bash
+streamlit run src/audio/app.py
+```
+App will open in your browser at `http://localhost:8501`.
+
+### 8. Automated & Manual Verification Results
+* **Automated Tests**: 9 dedicated unit and integration tests in [`tests/test_task3_audio.py`](file:///Z:/ConsultBae_AI_Automation_Assignment/tests/test_task3_audio.py) testing WAV metadata extraction, duration/sample rate/bitrate/loudness accuracy, corrupt file rejection, size limit enforcement, candidate lookup, DB insertion, and compensating disk cleanup on DB failure.
+* **End-to-End Manual Verification**: Verified end-to-end in live Streamlit browser UI (`http://localhost:8501`) with candidate `Varun Jain` (`9000000263`, `person_id = 18`):
+  * **Input & Identity Resolution**: Verified candidate Name and Phone input; successfully resolved existing candidate `person_id = 18`.
+  * **File Upload Test**: Verified uploading external `.wav` and `.mp3` audio files.
+  * **Native Browser Recording Test**: Verified capturing live audio via native browser audio recorder widget (`st.audio_input`).
+  * **Acoustic Property Extraction**: Extracted and verified Duration (2.5s), Sample Rate (44.1 kHz), Bitrate (705.74 kbps), and Loudness (-17.15 dBFS).
+  * **File Storage**: Verified media files saved safely in `data/audio_uploads/audio_18_{timestamp}_{uuid}.wav`.
+  * **Database Persistence**: Verified Supabase PostgreSQL database insertion in `audio_submissions`.
+  * **Gallery & Playback Test**: Verified Submissions Gallery view renders stored candidate submissions with inline browser audio player (`st.audio`) playback, displaying complete metadata and handling multiple submissions per candidate.
 
 ---
 
@@ -365,6 +439,26 @@ Documentation of the technical challenges encountered during the design and impl
 
 ---
 
+### Challenge 7: Audio Decibel Extraction (`dBFS`) for Silent / Low-Volume Clips
+* **Problem**: When processing silent or low-amplitude audio files with `pydub`, `audio_segment.dBFS` evaluates to `-inf` (negative infinity), causing PostgreSQL schema floating-point insert errors or invalid JSON values in web views.
+* **What I Tried**: Tested metadata extraction on silent WAV buffers; confirmed `-inf` values caused database insertion failures.
+* **What I Searched / Asked AI**: Evaluated AudioSegment decibel normalization handling for zero-amplitude digital signals.
+* **What Worked**: Implemented an explicit decibel floor check in `src/audio/extractor.py`: if `math.isinf(loudness_db)` or `math.isnan(loudness_db)`, default `loudness_db = -99.0`. An application-level -99 dBFS floor is used to keep non-finite loudness values out of the database and UI.
+* **What I Rejected & Why**: Rejected storing `NaN` or `-inf` directly into relational numeric columns because standard PostgreSQL numeric types and JSON serializers reject non-finite floating-point representations.
+* **Final Result**: Guarantees safe numeric range values for PostgreSQL schema validation and Streamlit frontend UI components.
+
+---
+
+### Challenge 8: Compensating Disk Cleanup on Database Insert Failure
+* **Problem**: If a user uploads a valid audio file that passes metadata extraction, the application writes the file to disk (`data/audio_uploads/`) *before* executing the PostgreSQL `INSERT` transaction. If the database transaction fails, the audio file remains on disk as an orphaned file.
+* **What I Tried**: Considered writing to the database first before saving the file to disk, but generating a safe file path after DB insertion leads to secondary update queries.
+* **What I Searched / Asked AI**: Evaluated cleanup guardrails for disk file operations accompanying relational database transactions.
+* **What Worked**: Wrapped the database insertion in a `try...except` block in `src/audio/extractor.py`. If `conn.execute()` or `conn.commit()` raises an exception, the handler issues `conn.rollback()` and deletes the newly created audio file from disk (`os.remove(file_path)`). This provides compensating cleanup so failed database writes do not normally leave orphaned audio files.
+* **What I Rejected & Why**: Rejected leaving orphaned disk files when database writes fail because it causes disk leakage and broken data lineage.
+* **Final Result**: Reduces filesystem pollution by removing unreferenced temporary audio uploads when database operations fail. Automated test `test_process_and_store_submission_db_failure_cleanup` in `tests/test_task3_audio.py` simulates database failure and verifies temporary file cleanup.
+
+---
+
 ## Task 5 — Stretch
 
 **Status: NOT STARTED**
@@ -377,7 +471,10 @@ Documentation of the technical challenges encountered during the design and impl
 
 - [x] **GitHub repository** with incremental commit history
 - [x] **README.md** with setup guide + Data Issues Report + Stuck Log
-- [x] **Task 2 n8n flow JSON** exported into repo (`n8n/candidate_skill_autotagging_flow.json`)
-- [ ] **Task 3 Mini audio collection app** working end-to-end
+- [x] **Task 1 — Merge**: COMPLETED (`src/app/main.py` & `tests/test_task1.py`)
+- [x] **Task 2 — Automate with a no-code/low-code tool**: COMPLETED (`n8n/candidate_skill_autotagging_flow.json` & `ai_skill_classifications`)
+- [x] **Task 3 — Mini audio collection app**: COMPLETED (`src/audio/app.py` & `audio_submissions`)
+- [x] **Task 4 — Data issues report**: COMPLETED (Embedded in [`README.md#data-issues-report`](#data-issues-report))
+- [ ] **Task 5 — Stretch**: NOT STARTED / OPTIONAL
 - [ ] **Screen recording** ($\le$ 6 minutes, voice required, face optional)
 - [ ] **Final email reply** containing repository link + video link before deadline

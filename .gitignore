@@ -71,6 +71,9 @@ assignment/
 *.sqlite
 *.sqlite3
 
+# Audio Uploads & Media Assets
+data/audio_uploads/
+
 # Temporary files & logs
 tmp/
 temp/

@@ -161,3 +161,19 @@ CREATE TABLE IF NOT EXISTS ai_skill_classifications (
 );
 
 CREATE INDEX IF NOT EXISTS idx_ai_classifications_person ON ai_skill_classifications(person_id);
+
+-- 5. TASK 3 AUDIO SUBMISSIONS LAYER
+CREATE TABLE IF NOT EXISTS audio_submissions (
+    submission_id SERIAL PRIMARY KEY,
+    person_id INT NOT NULL REFERENCES persons(person_id) ON DELETE CASCADE,
+    original_filename VARCHAR(255) NOT NULL,
+    file_path TEXT NOT NULL,
+    file_size_bytes BIGINT NOT NULL,
+    duration_seconds DOUBLE PRECISION NOT NULL,
+    sample_rate_khz DOUBLE PRECISION NOT NULL,
+    bitrate_kbps DOUBLE PRECISION NOT NULL,
+    loudness_db DOUBLE PRECISION NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_audio_submissions_person ON audio_submissions(person_id);

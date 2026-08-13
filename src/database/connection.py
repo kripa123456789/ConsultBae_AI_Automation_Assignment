@@ -30,7 +30,7 @@ class PostgresCursorWrapper:
         try:
             res = self._cur.fetchone()
             if res:
-                return res.get("person_id") or res.get("id") or res.get("quarantine_id") or res.get("classification_id") or 0
+                return res.get("person_id") or res.get("id") or res.get("quarantine_id") or res.get("classification_id") or res.get("submission_id") or 0
         except Exception:
             pass
         return 0
@@ -70,6 +70,8 @@ class PostgresConnectionWrapper:
                 sql_strip = sql_strip.rstrip(";") + " RETURNING quarantine_id;"
             elif "INTO AI_SKILL_CLASSIFICATIONS" in up:
                 sql_strip = sql_strip.rstrip(";") + " RETURNING classification_id;"
+            elif "INTO AUDIO_SUBMISSIONS" in up:
+                sql_strip = sql_strip.rstrip(";") + " RETURNING submission_id;"
         cur.execute(sql_strip, params or ())
         return PostgresCursorWrapper(cur)
 
