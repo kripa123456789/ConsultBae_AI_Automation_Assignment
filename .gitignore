@@ -63,6 +63,9 @@ venv.bak/
 .env.*
 !.env.example
 
+# Employer Assignment PDF / Instructions
+assignment/
+
 # Local Databases (e.g. SQLite, local DB dumps)
 *.db
 *.sqlite
