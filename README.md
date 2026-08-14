@@ -14,6 +14,9 @@ An AI automation pipeline and web application designed to merge candidate data a
 | **Task 4** | **Data Issues Report** | **COMPLETED** | Complete 13-item data quality analysis embedded in [Data Issues Report](#data-issues-report) below. |
 | **Task 5** | **Stretch Architecture Exercise** | **COMPLETED** | 1-page scaling analysis for 5,000 workers embedded in [Task 5 — Stretch](#task-5--stretch-scaling-to-5000-workers) below. |
 
+## Demo Video 
+Drive Link: https://drive.google.com/file/d/1ujwoo5A89fBlYhZNJH4gEeIRtVGkssII/view?usp=sharing
+
 ---
 
 ## Quick Start & Setup Guide
